@@ -222,6 +222,7 @@ function pInicio() {
     '<div class="rejilla">' +
       mosaico('📄', 'Mis CV', E.cvs.length ? E.cvs.length + ' creados' : 'Ninguno aún', 'miscv') +
       mosaico('📤', 'Subir CV', 'PDF o foto', 'subir') +
+      mosaico('🎯', 'Qué busco', E.busqueda && E.busqueda.quitados.length ? 'Afinado' : 'Todo', 'busqueda') +
       mosaico('🔎', 'Ofertas', 'Próximamente', '', true) +
       mosaico('📋', 'Candidaturas', 'Próximamente', '', true) +
       mosaico('✉️', 'Correo', 'Próximamente', '', true) +
@@ -429,8 +430,70 @@ async function procesarRespuestas() {
       .map((o, i) => Object.assign({}, o, { id: 'o' + Date.now() + '_' + i }));
     guardar();
     quitarCarga();
-    ir('orientaciones');
+    ir(E.busqueda ? 'orientaciones' : 'busqueda/seguir');
   } catch (err) { fallo(err); }
+}
+
+// --- Qué busco (sectores y puestos) ---
+
+const SECTORES = [
+  'Atención al cliente', 'Turismo y viajes', 'Hostelería y restauración', 'Transporte y aeropuertos',
+  'Logística y almacén', 'Comercio y ventas', 'Administración y oficina', 'Banca, finanzas e inversión',
+  'Informática y tecnología', 'Sanidad y cuidados', 'Educación y formación', 'Limpieza y mantenimiento',
+  'Industria y producción', 'Construcción', 'Seguridad', 'Agricultura', 'Marketing y comunicación',
+  'Recursos humanos', 'Administración pública', 'Otros'
+];
+
+// Todo lo que no se ha desmarcado cuenta como marcado (por defecto se busca en todo)
+function busquedaActual() {
+  const b = E.busqueda || { quitados: [], extra: [] };
+  const puestos = Array.from(new Set(lleno((E.preferencias && E.preferencias.puestos) || []).concat(b.extra || [])));
+  return { b, puestos };
+}
+
+function pBusqueda(arg) {
+  const { b, puestos } = busquedaActual();
+  const quitados = new Set(b.quitados || []);
+  const ficha = (x) => '<button class="opcion marca' + (quitados.has(x) ? '' : ' marcada') + '" data-m="' + esc(x) + '">' + esc(x) + '</button>';
+  const seguir = arg === 'seguir';
+
+  pantalla('Qué busco',
+    '<h2>¿Dónde quieres que busque?</h2>' +
+    '<p class="suave">Por defecto busco en <b>todo</b>. Desmarca lo que no te interese para afinar el tiro. Puedes cambiarlo cuando quieras desde el inicio.</p>' +
+    '<div class="fila"><button class="boton secundario" id="todo">Marcar todo</button>' +
+    '<button class="boton secundario" id="nada">Desmarcar todo</button></div>' +
+    (puestos.length ? '<h3>Tipos de puesto</h3><div class="marcas">' + puestos.map(ficha).join('') + '</div>' : '') +
+    '<h3>Sectores</h3><div class="marcas">' + SECTORES.map(ficha).join('') + '</div>' +
+    '<label class="campo" for="nuevo">Añadir un puesto o sector</label>' +
+    '<div class="fila"><input type="text" id="nuevo" placeholder="Por ejemplo: guía turístico">' +
+    '<button class="boton" id="anadir" style="flex:0 0 110px;margin:0">Añadir</button></div>' +
+    '<button class="boton" id="guardar-busqueda">' + (seguir ? 'Guardar y continuar' : 'Guardar') + '</button>');
+
+  const recoger = () => {
+    const nuevo = { quitados: [], extra: (E.busqueda && E.busqueda.extra) || [] };
+    document.querySelectorAll('.marca').forEach((x) => { if (!x.classList.contains('marcada')) nuevo.quitados.push(x.dataset.m); });
+    E.busqueda = nuevo;
+    guardar();
+  };
+  document.querySelectorAll('.marca').forEach((x) => { x.onclick = () => x.classList.toggle('marcada'); });
+  $('#todo').onclick = () => document.querySelectorAll('.marca').forEach((x) => x.classList.add('marcada'));
+  $('#nada').onclick = () => document.querySelectorAll('.marca').forEach((x) => x.classList.remove('marcada'));
+  $('#anadir').onclick = () => {
+    const t = $('#nuevo').value.trim();
+    if (!t) return;
+    recoger();
+    if (!E.busqueda.extra.includes(t) && !SECTORES.includes(t)) E.busqueda.extra.push(t);
+    E.busqueda.quitados = E.busqueda.quitados.filter((x) => x !== t);
+    guardar();
+    pBusqueda(arg);
+  };
+  $('#guardar-busqueda').onclick = () => {
+    recoger();
+    const marcados = document.querySelectorAll('.marca.marcada').length;
+    if (!marcados) { mensaje('Deja marcado al menos un puesto o sector, o pulsa "Marcar todo".'); return; }
+    if (seguir) ir('orientaciones');
+    else mensaje('Guardado. Buscaré en ' + marcados + ' puestos y sectores.', [{ texto: 'Volver al inicio', accion: () => ir('inicio') }]);
+  };
 }
 
 // --- Propuestas de CV ---
@@ -569,6 +632,7 @@ const RUTAS = {
   subir: pSubir,
   preguntas: pPreguntas,
   orientaciones: pOrientaciones,
+  busqueda: pBusqueda,
   miscv: pMisCv,
   cv: pCv
 };

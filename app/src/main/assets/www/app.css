@@ -118,6 +118,9 @@ label.campo { display: block; font-weight: 600; margin: 14px 0 6px; }
 .opcion.marcada { border-color: var(--primario); background: var(--primario-claro); font-weight: 600; }
 .opcion.marcada::before { content: "✓  "; color: var(--primario); }
 
+.marcas { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 16px; }
+.opcion.marca { display: inline-block; width: auto; margin: 0; padding: 10px 14px; min-height: 0; border-radius: 22px; font-size: 16px; }
+#pantalla > h3 { margin-top: 16px; }
 .orientacion { display: flex; gap: 12px; align-items: flex-start; }
 .orientacion input { width: 26px; height: 26px; margin-top: 2px; flex: none; accent-color: var(--primario); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
