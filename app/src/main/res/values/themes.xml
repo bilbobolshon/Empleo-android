@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primario">#1F5FAD</color>
+    <color name="fondo">#F4F6FA</color>
+    <style name="Tema" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/primario</item>
+        <item name="android:windowBackground">@color/fondo</item>
+        <item name="android:colorAccent">@color/primario</item>
+    </style>
+</resources>

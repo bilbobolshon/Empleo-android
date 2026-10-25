@@ -1,0 +1,50 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'es.fran.empleo'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "es.fran.empleo"
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "0.1"
+    }
+
+    // Firma fija: así cada APK nueva se instala encima de la anterior sin borrar tus datos
+    signingConfigs {
+        fija {
+            storeFile file('empleo.keystore')
+            storePassword 'empleo123'
+            keyAlias 'empleo'
+            keyPassword 'empleo123'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.fija
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.fija
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.11.0'
+    implementation 'androidx.core:core:1.13.1'
+}

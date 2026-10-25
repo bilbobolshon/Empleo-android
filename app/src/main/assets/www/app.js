@@ -1,0 +1,596 @@
+'use strict';
+// Mi Empleo — fase 1: importar CV, preguntas y creación de CV adaptados.
+
+const CLAVE = 'miempleo.v1';
+const MODELOS = [
+  { id: 'claude-sonnet-5-5', nombre: 'Equilibrado (recomendado)' },
+  { id: 'claude-haiku-5-5', nombre: 'Rápido y más barato' },
+  { id: 'claude-opus-5-5', nombre: 'Máxima calidad (más caro)' }
+];
+
+// ---------- Datos guardados en el móvil ----------
+
+function estadoInicial() {
+  return {
+    ajustes: { apiKey: '', modelo: MODELOS[0].id },
+    fuentes: [],          // nombres de los CV subidos
+    perfil: null,         // datos extraídos de los CV
+    preguntas: [],
+    respuestas: {},
+    preferencias: null,
+    orientaciones: [],
+    cvs: []               // CV creados
+  };
+}
+
+function cargar() {
+  try {
+    const t = localStorage.getItem(CLAVE);
+    if (t) {
+      const d = JSON.parse(t);
+      const e = Object.assign(estadoInicial(), d);
+      e.ajustes = Object.assign(estadoInicial().ajustes, d.ajustes || {});
+      return e;
+    }
+  } catch (err) { /* datos dañados: empezamos de cero */ }
+  return estadoInicial();
+}
+
+let E = cargar();
+let pendientes = []; // archivos elegidos y aún sin analizar (solo en memoria)
+
+function guardar() {
+  try { localStorage.setItem(CLAVE, JSON.stringify(E)); }
+  catch (err) { mensaje('No se han podido guardar los datos en el móvil.\n' + err.message); }
+}
+
+// ---------- Utilidades de pantalla ----------
+
+const $ = (s) => document.querySelector(s);
+const nativo = window.Android || null;
+
+function pantalla(titulo, html, conAtras = true) {
+  $('#titulo').textContent = titulo;
+  $('#atras').hidden = !conAtras;
+  $('#pantalla').innerHTML = html;
+  window.scrollTo(0, 0);
+}
+
+function cargando(texto) {
+  $('#carga-texto').textContent = texto || 'Un momento…';
+  $('#carga').hidden = false;
+}
+function quitarCarga() { $('#carga').hidden = true; }
+
+function mensaje(texto, botones) {
+  botones = botones || [{ texto: 'Entendido' }];
+  $('#dialogo-texto').textContent = texto;
+  const caja = $('#dialogo-botones');
+  caja.innerHTML = '';
+  botones.forEach((b, i) => {
+    const el = document.createElement('button');
+    el.className = 'boton' + (i > 0 ? ' secundario' : '');
+    el.textContent = b.texto;
+    el.onclick = () => { $('#dialogo').hidden = true; if (b.accion) b.accion(); };
+    caja.appendChild(el);
+  });
+  $('#dialogo').hidden = false;
+}
+
+function preguntar(texto, siTexto, accion) {
+  mensaje(texto, [{ texto: siTexto, accion }, { texto: 'Cancelar' }]);
+}
+
+function fallo(err) {
+  quitarCarga();
+  if (err && err.message === 'SIN_CLAVE') {
+    mensaje('Primero tienes que conectar la IA: pega tu clave en Ajustes.',
+      [{ texto: 'Ir a Ajustes', accion: () => ir('ajustes') }, { texto: 'Ahora no' }]);
+    return;
+  }
+  mensaje((err && err.message) || 'Ha ocurrido un error inesperado.');
+}
+
+function ir(ruta) {
+  if (location.hash === '#' + ruta) pintar();
+  else location.hash = '#' + ruta;
+}
+
+function abrirEnlace(url) {
+  if (nativo) nativo.abrirEnlace(url); else window.open(url, '_blank');
+}
+
+function fecha(ms) {
+  return new Date(ms).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function nombreCorto() {
+  const n = E.perfil && E.perfil.nombre;
+  return n ? n.trim().split(/\s+/)[0] : '';
+}
+
+// ---------- Conexión con la IA (Claude) ----------
+
+async function ia(contenido, maxTokens) {
+  if (!E.ajustes.apiKey) throw new Error('SIN_CLAVE');
+  let r;
+  try {
+    r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': E.ajustes.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: E.ajustes.modelo,
+        max_tokens: maxTokens || 8000,
+        system: SISTEMA,
+        messages: [{ role: 'user', content: contenido }]
+      })
+    });
+  } catch (err) {
+    throw new Error('No hay conexión con la IA. Comprueba que tienes internet y vuelve a intentarlo.');
+  }
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const m = (d.error && d.error.message) || '';
+    if (r.status === 401) throw new Error('La clave de la IA no es válida. Revísala en Ajustes.');
+    if (r.status === 429 || r.status === 529 || r.status === 503) throw new Error('La IA está saturada ahora mismo. Espera un minuto y vuelve a intentarlo.');
+    if (/credit|balance/i.test(m)) throw new Error('Tu cuenta de la IA no tiene saldo. Añade crédito en console.anthropic.com.');
+    if (/model/i.test(m)) throw new Error('El modelo de IA elegido no está disponible. Cambia el modelo en Ajustes.\n\n(' + m + ')');
+    throw new Error('La IA ha devuelto un error (' + r.status + ').\n' + m);
+  }
+  if (d.stop_reason === 'max_tokens') throw new Error('La respuesta de la IA era demasiado larga y se cortó. Vuelve a intentarlo.');
+  return (d.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+}
+
+async function iaJson(contenido, maxTokens) {
+  const t = await ia(contenido, maxTokens);
+  const a = t.indexOf('{'), b = t.lastIndexOf('}');
+  try {
+    if (a < 0 || b < a) throw new Error();
+    return JSON.parse(t.slice(a, b + 1));
+  } catch (err) {
+    throw new Error('La IA ha respondido de forma incompleta. Vuelve a intentarlo.');
+  }
+}
+
+// ---------- Lectura de archivos ----------
+
+function leerBase64(file) {
+  return new Promise((ok, ko) => {
+    const fr = new FileReader();
+    fr.onload = () => ok(String(fr.result).split(',')[1]);
+    fr.onerror = () => ko(new Error('No se ha podido leer "' + file.name + '".'));
+    fr.readAsDataURL(file);
+  });
+}
+
+async function fotoReducida(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, ko) => {
+      const i = new Image();
+      i.onload = () => ok(i);
+      i.onerror = () => ko(new Error('No se ha podido abrir la foto "' + file.name + '". Prueba con otra foto o con el PDF.'));
+      i.src = url;
+    });
+    const max = 1800;
+    const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.round(img.naturalWidth * k), h = Math.round(img.naturalHeight * k);
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.getContext('2d').drawImage(img, 0, 0, w, h);
+    return c.toDataURL('image/jpeg', 0.85).split(',')[1];
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function tipoArchivo(file) {
+  if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) return 'pdf';
+  if (/^image\//.test(file.type) || /\.(jpe?g|png|webp|heic)$/i.test(file.name)) return 'foto';
+  return null;
+}
+
+// ---------- Pantallas ----------
+
+function pInicio() {
+  const n = nombreCorto();
+  let urgente;
+  const sinResponder = E.preguntas.findIndex((p) => !E.respuestas[p.id]);
+  if (!E.ajustes.apiKey) {
+    urgente = tarjetaUrgente('Para empezar', 'Conecta la IA', 'Es lo que lee tus CV y los mejora. Te explico cómo en un minuto.', 'ajustes');
+  } else if (!E.perfil) {
+    urgente = tarjetaUrgente('Siguiente paso', 'Sube tu CV', 'En PDF o con una foto. Puedes subir varios.', 'subir');
+  } else if (!E.preferencias && E.preguntas.length) {
+    urgente = tarjetaUrgente('Pendiente de ti', 'Responde unas preguntas',
+      'Te quedan ' + E.preguntas.filter((p) => !E.respuestas[p.id]).length + ' de ' + E.preguntas.length + '. Sirven para mejorar tu CV.',
+      'preguntas/' + Math.max(0, sinResponder));
+  } else if (E.preferencias && !E.cvs.length) {
+    urgente = tarjetaUrgente('Siguiente paso', 'Elige qué CV crear', 'Ya tengo propuestas preparadas para ti.', 'orientaciones');
+  } else {
+    urgente = '<div class="tarjeta bien"><div class="etiqueta">Todo al día</div>' +
+      '<h3>Tus CV están listos</h3><p class="suave">Tienes ' + E.cvs.length + ' CV creados. Pronto la app buscará ofertas por ti.</p></div>';
+  }
+
+  pantalla('Mi Empleo',
+    '<h2>Hola' + (n ? ', ' + esc(n) : '') + '</h2>' +
+    urgente +
+    '<div class="rejilla">' +
+      mosaico('📄', 'Mis CV', E.cvs.length ? E.cvs.length + ' creados' : 'Ninguno aún', 'miscv') +
+      mosaico('📤', 'Subir CV', 'PDF o foto', 'subir') +
+      mosaico('🔎', 'Ofertas', 'Próximamente', '', true) +
+      mosaico('📋', 'Candidaturas', 'Próximamente', '', true) +
+      mosaico('✉️', 'Correo', 'Próximamente', '', true) +
+      mosaico('⚙️', 'Ajustes', E.ajustes.apiKey ? 'IA conectada' : 'Falta la IA', 'ajustes') +
+    '</div>', false);
+}
+
+function tarjetaUrgente(etiqueta, titulo, texto, ruta) {
+  return '<div class="tarjeta urgente pulsable" data-ir="' + ruta + '">' +
+    '<div class="etiqueta">' + etiqueta + '</div><h3>' + titulo + ' →</h3><p class="suave">' + texto + '</p></div>';
+}
+
+function mosaico(icono, titulo, nota, ruta, pronto) {
+  return '<div class="mosaico' + (pronto ? ' pronto' : '') + '"' + (ruta ? ' data-ir="' + ruta + '"' : ' data-pronto="1"') + '>' +
+    '<span class="icono">' + icono + '</span>' + titulo + '<span class="nota">' + nota + '</span></div>';
+}
+
+// --- Ajustes ---
+
+function pAjustes() {
+  const opciones = MODELOS.map((m) =>
+    '<option value="' + m.id + '"' + (m.id === E.ajustes.modelo ? ' selected' : '') + '>' + m.nombre + '</option>').join('');
+  pantalla('Ajustes',
+    '<div class="tarjeta"><h3>Conectar la IA</h3>' +
+    '<p class="suave">La app usa la IA Claude para leer tus CV, hacerte preguntas y redactar los CV nuevos. Necesita una clave personal. Cuesta céntimos por uso.</p>' +
+    '<ol class="pasos suave">' +
+      '<li>Abre la web de Anthropic con el botón de abajo y crea una cuenta o entra.</li>' +
+      '<li>Añade algo de saldo (con 5 € tienes para mucho tiempo).</li>' +
+      '<li>Ve a <b>API Keys</b> y pulsa <b>Create Key</b>.</li>' +
+      '<li>Copia la clave (empieza por <b>sk-ant-</b>) y pégala aquí.</li>' +
+    '</ol>' +
+    '<button class="boton secundario" id="abrir-consola">Abrir la web para conseguir la clave</button>' +
+    '<label class="campo" for="clave">Tu clave</label>' +
+    '<input type="password" id="clave" placeholder="sk-ant-…" autocomplete="off" value="' + esc(E.ajustes.apiKey) + '">' +
+    '<button class="boton texto" id="ver-clave">Mostrar la clave</button>' +
+    '<label class="campo" for="modelo">Tipo de IA</label>' +
+    '<select id="modelo">' + opciones + '</select>' +
+    '<button class="boton" id="guardar-clave">Guardar y comprobar</button></div>' +
+
+    '<div class="tarjeta"><h3>Tus datos</h3>' +
+    '<p class="suave">Todo se guarda solo en este móvil. ' +
+    (E.fuentes.length ? 'CV subidos: ' + E.fuentes.map(esc).join(', ') + '.' : 'Aún no has subido ningún CV.') + '</p>' +
+    '<button class="boton peligro" id="borrar-todo">Borrar todos mis datos</button></div>' +
+    '<p class="suave centro">Versión ' + esc(nativo ? nativo.version() : 'web') + '</p>');
+
+  $('#abrir-consola').onclick = () => abrirEnlace('https://console.anthropic.com/settings/keys');
+  $('#ver-clave').onclick = (ev) => {
+    const c = $('#clave');
+    c.type = c.type === 'password' ? 'text' : 'password';
+    ev.target.textContent = c.type === 'password' ? 'Mostrar la clave' : 'Ocultar la clave';
+  };
+  $('#guardar-clave').onclick = async () => {
+    const clave = $('#clave').value.trim();
+    if (!clave) { mensaje('Pega primero tu clave.'); return; }
+    E.ajustes.apiKey = clave;
+    E.ajustes.modelo = $('#modelo').value;
+    guardar();
+    cargando('Comprobando la conexión con la IA…');
+    try {
+      await ia([{ type: 'text', text: 'Responde solo con la palabra: listo' }], 20);
+      quitarCarga();
+      mensaje('¡Conectado! La IA funciona correctamente.', [{ texto: 'Continuar', accion: () => ir('inicio') }]);
+    } catch (err) { fallo(err); }
+  };
+  $('#borrar-todo').onclick = () => preguntar(
+    '¿Seguro que quieres borrar todos tus datos? Se perderán tu perfil, las respuestas y los CV creados. La clave de la IA se mantiene.',
+    'Sí, borrar todo', () => {
+      const ajustes = E.ajustes;
+      E = estadoInicial(); E.ajustes = ajustes; guardar(); ir('inicio');
+    });
+}
+
+// --- Subir CV ---
+
+function pSubir() {
+  const lista = pendientes.map((p, i) =>
+    '<li><span>' + (p.tipo === 'pdf' ? '📄' : '🖼️') + '</span><span class="nombre">' + esc(p.nombre) + '</span>' +
+    '<button class="quitar" data-quitar="' + i + '" aria-label="Quitar">×</button></li>').join('');
+
+  pantalla('Subir CV',
+    '<h2>Tus CV actuales</h2>' +
+    '<p class="suave">Sube uno o varios CV en PDF, o hazles una foto. La IA los leerá y te hará unas preguntas para completarlos.' +
+    (E.perfil ? ' Lo nuevo se combinará con lo que ya tienes.' : '') + '</p>' +
+    '<label class="boton secundario" for="elegir">📁  Elegir PDF o foto del móvil</label>' +
+    '<input class="archivo-oculto" type="file" id="elegir" accept="application/pdf,image/*" multiple>' +
+    '<label class="boton secundario" for="camara">📷  Hacer una foto al CV</label>' +
+    '<input class="archivo-oculto" type="file" id="camara" accept="image/*" capture="environment">' +
+    (pendientes.length ? '<ul class="lista-archivos">' + lista + '</ul>' : '<p class="suave centro">Todavía no has elegido ningún archivo.</p>') +
+    '<p class="suave">Consejo para las fotos: buena luz, el papel entero en la imagen y sin sombras.</p>' +
+    '<button class="boton" id="analizar"' + (pendientes.length ? '' : ' disabled') + '>Analizar ' +
+    (pendientes.length > 1 ? 'mis ' + pendientes.length + ' CV' : 'mi CV') + '</button>');
+
+  const anadir = (ev) => {
+    const malos = [];
+    Array.from(ev.target.files || []).forEach((f) => {
+      const tipo = tipoArchivo(f);
+      if (tipo) pendientes.push({ nombre: f.name || 'Foto', tipo, file: f });
+      else malos.push(f.name);
+    });
+    pSubir();
+    if (malos.length) mensaje('Estos archivos no son PDF ni fotos y no se han añadido:\n' + malos.join('\n'));
+  };
+  $('#elegir').onchange = anadir;
+  $('#camara').onchange = anadir;
+  document.querySelectorAll('[data-quitar]').forEach((b) => {
+    b.onclick = () => { pendientes.splice(Number(b.dataset.quitar), 1); pSubir(); };
+  });
+  $('#analizar').onclick = analizar;
+}
+
+async function analizar() {
+  if (!E.ajustes.apiKey) { fallo(new Error('SIN_CLAVE')); return; }
+  cargando('Leyendo tus CV…\nPuede tardar hasta un minuto.');
+  try {
+    const bloques = [];
+    for (const p of pendientes) {
+      if (p.tipo === 'pdf') {
+        if (p.file.size > 25 * 1024 * 1024) throw new Error('El PDF "' + p.nombre + '" es demasiado grande (más de 25 MB).');
+        bloques.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: await leerBase64(p.file) } });
+      } else {
+        bloques.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: await fotoReducida(p.file) } });
+      }
+    }
+    bloques.push({ type: 'text', text: promptAnalisis(E.perfil) });
+    const r = await iaJson(bloques, 16000);
+    if (!r.perfil) throw new Error('La IA no ha encontrado datos de un CV en esos archivos. Revisa que se lean bien.');
+    E.perfil = r.perfil;
+    E.preguntas = (r.preguntas || []).filter((p) => p && p.texto).slice(0, 15)
+      .map((p, i) => Object.assign({ id: 'p' + (i + 1), tipo: 'texto', opciones: [] }, p, { id: 'p' + (i + 1) }));
+    E.respuestas = {};
+    E.preferencias = null;
+    E.orientaciones = [];
+    E.fuentes = E.fuentes.concat(pendientes.map((p) => p.nombre));
+    pendientes = [];
+    guardar();
+    quitarCarga();
+    if (E.preguntas.length) {
+      mensaje('He leído tu CV' + (E.perfil.nombre ? ', ' + E.perfil.nombre.split(' ')[0] : '') + '.\n\nAhora te haré ' + E.preguntas.length +
+        ' preguntas cortas para completarlo. Puedes saltarte las que quieras.',
+        [{ texto: 'Empezar', accion: () => ir('preguntas/0') }]);
+    } else {
+      procesarRespuestas();
+    }
+  } catch (err) { fallo(err); }
+}
+
+// --- Preguntas ---
+
+function pPreguntas(arg) {
+  const total = E.preguntas.length;
+  if (!total) { ir('inicio'); return; }
+  const i = Math.min(Math.max(0, Number(arg) || 0), total - 1);
+  const p = E.preguntas[i];
+  const r = E.respuestas[p.id] || { opciones: [], texto: '' };
+  const conOpciones = (p.tipo === 'opciones' || p.tipo === 'multiple') && lleno(p.opciones).length;
+
+  pantalla('Preguntas',
+    '<p class="suave">Pregunta ' + (i + 1) + ' de ' + total + '</p>' +
+    '<div class="progreso"><div style="width:' + Math.round(((i + 1) / total) * 100) + '%"></div></div>' +
+    '<div class="pregunta">' + esc(p.texto) + '</div>' +
+    (p.ayuda ? '<p class="suave">' + esc(p.ayuda) + '</p>' : '') +
+    (conOpciones
+      ? (p.tipo === 'multiple' ? '<p class="suave">Puedes marcar varias.</p>' : '') +
+        lleno(p.opciones).map((o) =>
+          '<button class="opcion' + (r.opciones.includes(o) ? ' marcada' : '') + '" data-op="' + esc(o) + '">' + esc(o) + '</button>').join('') +
+        '<label class="campo" for="resp">¿Quieres añadir algo? (opcional)</label>'
+      : '<label class="campo" for="resp">Tu respuesta</label>') +
+    '<textarea id="resp" placeholder="Escribe aquí…">' + esc(r.texto) + '</textarea>' +
+    '<button class="boton" id="siguiente">' + (i === total - 1 ? 'Terminar' : 'Siguiente') + '</button>' +
+    '<div class="fila">' +
+      (i > 0 ? '<button class="boton secundario" id="anterior">Anterior</button>' : '') +
+      '<button class="boton texto" id="saltar">Saltar esta pregunta</button>' +
+    '</div>');
+
+  const recoger = () => {
+    const texto = $('#resp').value;
+    const opciones = Array.from(document.querySelectorAll('.opcion.marcada')).map((b) => b.dataset.op);
+    if (texto.trim() || opciones.length) E.respuestas[p.id] = { opciones, texto };
+    else delete E.respuestas[p.id];
+    guardar();
+  };
+  document.querySelectorAll('.opcion').forEach((b) => {
+    b.onclick = () => {
+      if (p.tipo !== 'multiple') document.querySelectorAll('.opcion').forEach((x) => { if (x !== b) x.classList.remove('marcada'); });
+      b.classList.toggle('marcada');
+    };
+  });
+  const avanzar = () => {
+    if (i === total - 1) procesarRespuestas();
+    else ir('preguntas/' + (i + 1));
+  };
+  $('#siguiente').onclick = () => { recoger(); avanzar(); };
+  $('#saltar').onclick = () => { delete E.respuestas[p.id]; guardar(); avanzar(); };
+  const ant = $('#anterior');
+  if (ant) ant.onclick = () => { recoger(); ir('preguntas/' + (i - 1)); };
+}
+
+async function procesarRespuestas() {
+  cargando('Preparando tus propuestas de CV…');
+  try {
+    const r = await iaJson([{ type: 'text', text: promptRespuestas(E.perfil, E.preguntas, E.respuestas) }], 16000);
+    if (r.perfil) E.perfil = r.perfil;
+    E.preferencias = r.preferencias || {};
+    E.orientaciones = lleno(r.orientaciones).filter((o) => o.titulo)
+      .map((o, i) => Object.assign({}, o, { id: 'o' + Date.now() + '_' + i }));
+    guardar();
+    quitarCarga();
+    ir('orientaciones');
+  } catch (err) { fallo(err); }
+}
+
+// --- Propuestas de CV ---
+
+function pOrientaciones() {
+  if (!E.perfil) { ir('subir'); return; }
+  if (!E.preferencias) { ir('preguntas/0'); return; }
+  const lista = E.orientaciones.map((o) =>
+    '<label class="tarjeta orientacion"><input type="checkbox" data-o="' + esc(o.id) + '" checked>' +
+    '<div><h3>' + esc(o.titulo) + '</h3><p class="suave">' + esc(o.para_que || '') + '</p>' +
+    (lleno(o.puestos_ejemplo).length ? '<div class="chips">' + lleno(o.puestos_ejemplo).map((x) => '<span class="chip">' + esc(x) + '</span>').join('') + '</div>' : '') +
+    '</div></label>').join('');
+
+  pantalla('Qué CV crear',
+    '<h2>Te propongo estos CV</h2>' +
+    '<p class="suave">Cada uno destaca una parte distinta de tu experiencia. Marca los que quieras crear.</p>' +
+    (lista || '<p class="suave">No hay propuestas. Escribe abajo qué tipo de CV quieres.</p>') +
+    '<label class="campo" for="otro">¿Quieres otro tipo de CV? (opcional)</label>' +
+    '<input type="text" id="otro" placeholder="Por ejemplo: CV para recepción de hotel">' +
+    '<button class="boton" id="crear">Crear los CV marcados</button>' +
+    '<button class="boton texto" id="repreguntar">Volver a las preguntas</button>');
+
+  $('#crear').onclick = () => {
+    const marcadas = Array.from(document.querySelectorAll('[data-o]:checked')).map((c) => E.orientaciones.find((o) => o.id === c.dataset.o));
+    const otro = $('#otro').value.trim();
+    if (otro) {
+      const nueva = { id: 'o' + Date.now(), titulo: otro, para_que: otro, puestos_ejemplo: [] };
+      E.orientaciones.push(nueva);
+      marcadas.push(nueva);
+      guardar();
+    }
+    if (!marcadas.length) { mensaje('Marca al menos un CV o escribe el tipo que quieres.'); return; }
+    crearCvs(marcadas);
+  };
+  $('#repreguntar').onclick = () => ir('preguntas/0');
+}
+
+async function crearCvs(orientaciones) {
+  let creados = 0;
+  try {
+    for (let i = 0; i < orientaciones.length; i++) {
+      const o = orientaciones[i];
+      cargando('Creando CV ' + (i + 1) + ' de ' + orientaciones.length + ':\n' + o.titulo);
+      const contenido = await iaJson([{ type: 'text', text: promptCv(E.perfil, E.preferencias, o) }], 8000);
+      contenido.contacto = {
+        nombre: E.perfil.nombre || '', telefono: E.perfil.telefono || '',
+        email: E.perfil.email || '', localidad: E.perfil.localidad || ''
+      };
+      E.cvs.unshift({ id: 'cv' + Date.now() + '_' + i, titulo: o.titulo, orientacion: o.id, contenido, fecha: Date.now() });
+      guardar();
+      creados++;
+    }
+    quitarCarga();
+    mensaje(creados === 1 ? 'Tu CV está listo.' : 'Tus ' + creados + ' CV están listos.',
+      [{ texto: 'Verlos', accion: () => ir('miscv') }]);
+  } catch (err) {
+    fallo(err);
+    if (creados) setTimeout(() => ir('miscv'), 0);
+  }
+}
+
+// --- Mis CV ---
+
+function pMisCv() {
+  const lista = E.cvs.map((c) =>
+    '<div class="tarjeta pulsable" data-ir="cv/' + c.id + '"><h3>📄 ' + esc(c.titulo) + '</h3>' +
+    '<p class="suave">' + esc(c.contenido.titulo_profesional || '') + ' · creado el ' + fecha(c.fecha) + '</p></div>').join('');
+
+  pantalla('Mis CV',
+    (lista || '<div class="tarjeta"><h3>Aún no tienes CV creados</h3><p class="suave">Sube tu CV actual y te ayudo a crear versiones mejores.</p></div>') +
+    (E.preferencias ? '<button class="boton" data-ir="orientaciones">Crear otro CV</button>' : '<button class="boton" data-ir="subir">Subir mi CV</button>'));
+}
+
+function pCv(id) {
+  const c = E.cvs.find((x) => x.id === id);
+  if (!c) { ir('miscv'); return; }
+  const html = htmlCv(c.contenido);
+
+  pantalla(c.titulo,
+    '<p class="suave">Así queda tu CV. Toca "Guardar en PDF" y elige <b>Guardar como PDF</b> en la pantalla que aparece.</p>' +
+    '<div class="vista-cv" id="marco"><iframe id="cv-frame" title="Vista del CV"></iframe></div>' +
+    '<button class="boton" id="pdf">⬇️  Guardar en PDF</button>' +
+    '<label class="campo" for="cambios">¿Quieres cambiar algo?</label>' +
+    '<textarea id="cambios" placeholder="Por ejemplo: quita la experiencia de 2009, pon el teléfono 600 000 000, haz el resumen más corto…"></textarea>' +
+    '<button class="boton secundario" id="aplicar">Aplicar cambios</button>' +
+    '<button class="boton peligro" id="borrar">Borrar este CV</button>');
+
+  const frame = $('#cv-frame');
+  const ajustar = () => {
+    try {
+      const marco = $('#marco');
+      if (!marco) return;
+      const escala = marco.clientWidth / 794;
+      const alto = frame.contentDocument.documentElement.scrollHeight;
+      frame.style.height = alto + 'px';
+      frame.style.transform = 'scale(' + escala + ')';
+      marco.style.height = Math.ceil(alto * escala) + 'px';
+    } catch (err) { /* sin vista previa */ }
+  };
+  frame.onload = ajustar;
+  frame.srcdoc = html;
+  window.onresize = ajustar;
+
+  const nombreArchivo = 'CV ' + (c.contenido.contacto && c.contenido.contacto.nombre ? c.contenido.contacto.nombre + ' - ' : '') + c.titulo;
+  $('#pdf').onclick = () => {
+    if (nativo) nativo.guardarPdf(html, nombreArchivo);
+    else { const w = window.open(''); w.document.write(html); w.document.close(); w.print(); }
+  };
+  $('#aplicar').onclick = async () => {
+    const peticion = $('#cambios').value.trim();
+    if (!peticion) { mensaje('Escribe primero qué quieres cambiar.'); return; }
+    cargando('Aplicando los cambios…');
+    try {
+      const nuevo = await iaJson([{ type: 'text', text: promptCambios(c.contenido, peticion) }], 8000);
+      if (!nuevo.contacto) nuevo.contacto = c.contenido.contacto;
+      c.contenido = nuevo;
+      c.fecha = Date.now();
+      guardar();
+      quitarCarga();
+      pCv(id);
+      mensaje('Cambios aplicados.');
+    } catch (err) { fallo(err); }
+  };
+  $('#borrar').onclick = () => preguntar('¿Borrar el CV "' + c.titulo + '"?', 'Sí, borrar', () => {
+    E.cvs = E.cvs.filter((x) => x.id !== id);
+    guardar();
+    ir('miscv');
+  });
+}
+
+// ---------- Navegación ----------
+
+const RUTAS = {
+  inicio: pInicio,
+  ajustes: pAjustes,
+  subir: pSubir,
+  preguntas: pPreguntas,
+  orientaciones: pOrientaciones,
+  miscv: pMisCv,
+  cv: pCv
+};
+
+function pintar() {
+  window.onresize = null;
+  const h = (location.hash || '#inicio').slice(1);
+  const corte = h.indexOf('/');
+  const ruta = corte < 0 ? h : h.slice(0, corte);
+  const arg = corte < 0 ? undefined : decodeURIComponent(h.slice(corte + 1));
+  (RUTAS[ruta] || pInicio)(arg);
+}
+
+document.addEventListener('click', (ev) => {
+  const destino = ev.target.closest('[data-ir]');
+  if (destino) { ir(destino.dataset.ir); return; }
+  if (ev.target.closest('[data-pronto]')) mensaje('Esta parte llegará en las próximas fases de la app.');
+});
+
+$('#atras').onclick = () => {
+  if (history.length > 1) history.back(); else ir('inicio');
+};
+
+window.addEventListener('hashchange', pintar);
+pintar();
