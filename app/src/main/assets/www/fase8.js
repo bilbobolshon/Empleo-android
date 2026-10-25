@@ -13,69 +13,6 @@ function enviosHoy() {
   return E.envios;
 }
 
-// ---------- PDF del CV (sin diálogos, dentro de la app) ----------
-
-function cvPdfBase64(contenido) {
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  const c = contenido || {};
-  const k = c.contacto || {};
-  const azul = [31, 95, 173];
-  const M = 18, ANCHO = 210 - 2 * M;
-  let y = 20;
-  const limpiar = (t) => String(t == null ? '' : t).replace(/[^\x09\x0A\x0D\x20-\x7E -ÿ€–—‘’“”•]/g, '');
-  const salto = (alto) => { if (y + alto > 282) { doc.addPage(); y = 20; } };
-  const texto = (t, tam, estilo, color, sangria) => {
-    doc.setFont('helvetica', estilo || 'normal');
-    doc.setFontSize(tam);
-    doc.setTextColor(...(color || [34, 34, 34]));
-    const lineas = doc.splitTextToSize(limpiar(t), ANCHO - (sangria || 0));
-    lineas.forEach((l) => { salto(tam * 0.45); doc.text(l, M + (sangria || 0), y); y += tam * 0.42; });
-  };
-  const seccion = (titulo) => {
-    y += 3; salto(12);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...azul);
-    doc.text(titulo.toUpperCase(), M, y);
-    y += 1.6; doc.setDrawColor(213, 222, 234); doc.setLineWidth(0.3); doc.line(M, y, M + ANCHO, y); y += 5;
-  };
-  const vinetas = (lista) => lleno(lista).forEach((x) => {
-    salto(5); doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(34, 34, 34);
-    doc.text('•', M + 1, y); texto(x, 10, 'normal', null, 5);
-  });
-
-  texto(k.nombre || '', 20, 'bold', [19, 50, 90]);
-  if (c.titulo_profesional) { y += 1; texto(c.titulo_profesional, 12, 'bold', azul); }
-  const contacto = [k.telefono, k.email, k.localidad].filter(Boolean).join('   ·   ');
-  if (contacto) { y += 1; texto(contacto, 9.5, 'normal', [70, 70, 70]); }
-  y += 2; doc.setDrawColor(...azul); doc.setLineWidth(0.8); doc.line(M, y, M + ANCHO, y); y += 4;
-
-  if (c.resumen) { seccion('Perfil'); texto(c.resumen, 10); }
-  if (lleno(c.experiencia).length) {
-    seccion('Experiencia');
-    lleno(c.experiencia).forEach((e) => {
-      salto(10);
-      texto([e.puesto, e.empresa].filter(Boolean).join(' — '), 10.5, 'bold');
-      const sub = [e.lugar, e.fechas].filter(Boolean).join(' · ');
-      if (sub) texto(sub, 9, 'normal', [90, 90, 90]);
-      vinetas(e.puntos);
-      y += 2;
-    });
-  }
-  if (lleno(c.formacion).length) {
-    seccion('Formación');
-    lleno(c.formacion).forEach((f) => {
-      texto([f.titulo, f.centro].filter(Boolean).join(' — '), 10, 'bold');
-      if (f.fechas) texto(f.fechas, 9, 'normal', [90, 90, 90]);
-      y += 1;
-    });
-  }
-  if (lleno(c.idiomas).length) { seccion('Idiomas'); vinetas(c.idiomas); }
-  if (lleno(c.informatica).length) { seccion('Informática'); vinetas(c.informatica); }
-  if (lleno(c.competencias).length) { seccion('Competencias'); vinetas(c.competencias); }
-  if (lleno(c.otros).length) { seccion('Otros datos'); vinetas(c.otros); }
-  return doc.output('datauristring').split(',')[1];
-}
-
 function nombrePdf(cv) {
   const n = (cv.contenido.contacto && cv.contenido.contacto.nombre) || 'CV';
   return ('CV ' + n + ' - ' + cv.titulo).replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 80) + '.pdf';
@@ -188,18 +125,18 @@ const ERRORES_FORM = /campo (es )?obligatorio|this field is required|es obligato
 async function enviarEnWeb(c, o, cv) {
   await Nav.abrir(c.url);
   let a = await Nav.analizar();
-  if (a.obstaculo) { pausar(c, 'Necesita que entres en ' + (c.fuente || c.empresa || 'la web') + ' (' + textoObstaculo(a.obstaculo, '', 0).split('\n')[0].replace('Te toca: ', '') + ')'); return false; }
+  if (a.obstaculo) { pausar(c, motivoAcceso(a.obstaculo, c)); return 'acceso'; }
   hist(c, 'La app abrió la web de la oferta');
   const pdf = cvPdfBase64(cv.contenido);
   for (let paso = 0; paso < 6; paso++) {
     let campos = (await Nav.ejecutarJson(JS_FORMULARIO)) || [];
     if (!campos.filter((f) => f.tipo !== 'file').length) {
       const p = await Nav.ejecutarJson(jsPulsar('aplicar'));
-      if (!p || !p.pulsado) { pausar(c, 'No encontré el formulario para inscribirte'); return false; }
+      if (!p || !p.pulsado) { pausar(c, 'No encontré el formulario para inscribirte'); return 'manual'; }
       hist(c, 'Pulsó «' + p.pulsado + '»');
       await Nav.esperarCarga();
       a = await Nav.analizar();
-      if (a.obstaculo) { pausar(c, 'Necesita que entres en ' + (c.fuente || c.empresa || 'la web') + ' para inscribirte'); return false; }
+      if (a.obstaculo) { pausar(c, motivoAcceso(a.obstaculo, c)); return 'acceso'; }
       continue;
     }
     // Rellenar
@@ -213,22 +150,33 @@ async function enviarEnWeb(c, o, cv) {
       if (adj && adj.adjuntados) hist(c, 'Adjuntó el CV «' + cv.titulo + '»');
     }
     const falta = lleno(m.pendientes).filter((x) => !/privacidad|condiciones|t[eé]rminos|legal|rgpd|acepto/i.test(x));
-    if (falta.length) { pausar(c, 'Faltan datos que no tengo: ' + falta.slice(0, 4).join(', ')); return false; }
+    if (falta.length) { pausar(c, 'Faltan datos que no tengo: ' + falta.slice(0, 4).join(', ')); return 'manual'; }
     // Condiciones de privacidad obligatorias: se aceptan solo las marcadas como obligatorias para poder enviar
     await Nav.ejecutar(`(function(){ [].slice.call(document.querySelectorAll('input[type=checkbox][required]')).forEach(function(x){ var t=((x.closest('label,div,li')||{}).textContent||'').toLowerCase(); if(!x.checked && /privacidad|condiciones|t[eé]rminos|legal|rgpd|acepto/.test(t) && !/publicidad|comercial|newsletter/.test(t)) x.click(); }); return 1; })()`);
     // Enviar
     const e = await Nav.ejecutarJson(jsPulsar('enviar'));
-    if (!e || !e.pulsado) { pausar(c, 'Formulario rellenado, pero no encontré el botón de enviar'); return false; }
+    if (!e || !e.pulsado) { pausar(c, 'Formulario rellenado, pero no encontré el botón de enviar'); return 'manual'; }
     hist(c, 'Pulsó «' + e.pulsado + '»');
     await Nav.esperarCarga();
     a = await Nav.analizar();
-    if (EXITO.test(a.texto || '')) { marcarEnviadaAuto(c, 'en la web de ' + (c.empresa || c.fuente || 'la empresa'), cv); return true; }
-    if (a.obstaculo) { pausar(c, 'Al enviar pidió ' + (a.obstaculo === 'captcha' ? 'una verificación («no soy un robot»)' : 'entrar con tus datos')); return false; }
-    if (ERRORES_FORM.test(a.texto || '')) { pausar(c, 'La web marcó algún dato como incorrecto o incompleto'); return false; }
+    if (EXITO.test(a.texto || '')) { marcarEnviadaAuto(c, 'en la web de ' + (c.empresa || c.fuente || 'la empresa'), cv); return 'enviada'; }
+    if (a.obstaculo) { pausar(c, motivoAcceso(a.obstaculo, c)); return 'acceso'; }
+    if (ERRORES_FORM.test(a.texto || '')) { pausar(c, 'La web marcó algún dato como incorrecto o incompleto'); return 'manual'; }
     // Puede ser el siguiente paso de un formulario largo: se repite
   }
   pausar(c, 'No pude confirmar que se enviara: revísalo');
-  return false;
+  return 'manual';
+}
+
+function motivoAcceso(tipo, c) {
+  const web = c.fuente || c.empresa || 'la web';
+  return {
+    registro: 'Hay que crear una cuenta de candidato en ' + web + ' (usuario y contraseña). Pulsa «Hacerlo ahora», créala y yo sigo con la inscripción',
+    login: 'Hay que iniciar sesión en ' + web + ' (o crear la cuenta si no la tienes). Pulsa «Hacerlo ahora», entra y yo sigo',
+    clave: 'Hay que identificarse con Cl@ve o certificado en ' + web + '. Pulsa «Hacerlo ahora» y yo sigo',
+    captcha: web + ' pide una verificación «no soy un robot». Pulsa «Hacerlo ahora», resuélvela y yo sigo',
+    codigo: web + ' pide un código enviado por SMS o correo. Pulsa «Hacerlo ahora», escríbelo y yo sigo'
+  }[tipo] || 'Hace falta un paso tuyo en ' + web;
 }
 
 function marcarEnviadaAuto(c, como, cv) {
@@ -287,7 +235,7 @@ async function enviarListas(deUsuario) {
       const email = o.email || (E.sitios.find((s) => s.id === o.sitio) || {}).email;
       if (email && E.correo && E.correo.conectado) ok = await enviarPorCorreo(c, email, cv);
       if (!ok && c.url && Nav.disponible()) {
-        try { ok = await Nav.cola(() => enviarEnWeb(c, o, cv)); }
+        try { ok = (await Nav.cola(() => enviarEnWeb(c, o, cv))) === 'enviada'; }
         catch (err) { if (err.message === 'SIN_CLAVE') throw err; pausar(c, 'Se interrumpió: ' + err.message); }
       } else if (!ok && !c.url) {
         pausar(c, 'No hay web ni correo para enviarla');
@@ -300,7 +248,9 @@ async function enviarListas(deUsuario) {
     Nav.ocultar();
   }
   if (pendientes) {
-    notificarUsuario('Candidaturas que necesitan algo de ti', pendientes + (pendientes === 1 ? ' candidatura necesita' : ' candidaturas necesitan') + ' que hagas un paso (entrar, captcha o un dato). Las tienes en el inicio.');
+    const motivos = E.candidaturas.filter((c) => c.estado === 'pendiente_ti').slice(0, 3).map((c) => '• ' + (c.siguiente || '').split('.')[0]);
+    notificarUsuario(pendientes === 1 ? 'Una candidatura necesita un paso tuyo' : pendientes + ' candidaturas necesitan un paso tuyo',
+      motivos.join('\n') + '\nAbre la app: en el inicio tienes el botón «Hacerlo ahora».');
   }
   return { enviadas, pendientes };
 }

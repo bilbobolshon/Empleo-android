@@ -713,7 +713,34 @@ function presentarme(ofertaId, enCadena) {
     Nav.panel('Abriendo la oferta…', [{ id: 'cancelar', texto: 'Cancelar' }]);
     await Nav.abrir(c.url);
     if (Nav.tomarBotonSuelto() === 'cancelar') { pausar(c, 'La cancelaste al abrirla'); Nav.ocultar(); return; }
-    if (!(await resolverAcceso(null, c.fuente))) { pausar(c, 'Falta que entres en ' + (c.fuente || 'la web')); Nav.ocultar(); return; }
+    if (!(await resolverAcceso(c.url, c.fuente))) { pausar(c, 'Falta que entres en ' + (c.fuente || 'la web')); Nav.ocultar(); return; }
+    // Envío directo: tras el paso del usuario, la app retoma el control, rellena y envía sola
+    if (envioDirecto()) {
+      let r = '';
+      for (let intento = 0; intento < 4; intento++) {
+        Nav.panel('Perfecto, ya sigo yo: relleno y envío tu candidatura…', []);
+        r = await enviarEnWeb(c, o, cvUsado);
+        if (r === 'enviada') break;
+        const motivo = (c.siguiente || '').replace(/\. Pulsa «Continuar candidatura».*$/, '').replace(/Pulsa «Hacerlo ahora», /, '');
+        if (r === 'acceso') {
+          Nav.panel('Te toca: ' + motivo + '.\nCuando termines, pulsa «Ya está, continúa» y sigo yo.', BOTONES_ACCESO);
+          if ((await Nav.esperarBoton()) !== 'continuar') break;
+          continue;
+        }
+        // Falta algo del formulario: lo completa el usuario y lo envía él
+        Nav.panel(motivo + '.\nCompleta lo que falte en la web y pulsa TÚ su botón de enviar. Después pulsa «Ya la he enviado».',
+          [{ id: 'enviada', texto: 'Ya la he enviado', principal: true }, { id: 'cancelar', texto: 'Ahora no' }]);
+        if ((await Nav.esperarBoton()) === 'enviada') { marcarEnviada(c); r = 'enviada'; }
+        break;
+      }
+      if (!enCadena) Nav.ocultar();
+      guardar();
+      if (!enCadena) {
+        mensaje(r === 'enviada' ? 'Candidatura enviada. Tienes el detalle en Candidaturas.' : 'La dejo pendiente: ' + (c.siguiente || ''),
+          [{ texto: 'Ver candidatura', accion: () => ir('candidatura/' + c.id) }]);
+      }
+      return;
+    }
     hist(c, 'La app abrió la oferta');
     let vueltas = 0;
     for (;;) {
@@ -812,8 +839,11 @@ function urgentesFase2() {
       '<h3>Entra en ' + esc(s.nombre) + ' →</h3><p class="suave">' + esc(textoObstaculo(s.obstaculo, '', 0).split('\n')[0].replace('Te toca: ', '')) + ' Luego sigo yo.</p></div>');
   });
   E.candidaturas.filter((c) => c.estado === 'pendiente_ti').forEach((c) => {
-    t.push('<div class="tarjeta urgente pulsable" data-ir="candidatura/' + c.id + '"><div class="etiqueta">Pendiente de ti</div>' +
-      '<h3>Termina tu candidatura →</h3><p class="suave">' + esc(c.titulo) + (c.empresa ? ' — ' + esc(c.empresa) : '') + '</p></div>');
+    t.push('<div class="tarjeta urgente"><div class="etiqueta">Pendiente de ti</div>' +
+      '<h3>' + esc(c.titulo) + (c.empresa ? ' — ' + esc(c.empresa) : '') + '</h3>' +
+      '<p class="suave">' + esc(c.siguiente || 'Termina tu candidatura.') + '</p>' +
+      '<div class="fila"><button class="boton" data-accion="presentarme:' + c.oferta + '">Hacerlo ahora</button>' +
+      '<button class="boton secundario" data-ir="candidatura/' + c.id + '">Ver</button></div></div>');
   });
   E.candidaturas.filter((c) => c.estado === 'entrevista' || c.estado === 'respondida').forEach((c) => {
     t.push('<div class="tarjeta bien pulsable" data-ir="candidatura/' + c.id + '"><div class="etiqueta">' + ESTADOS[c.estado].t + '</div>' +

@@ -121,7 +121,10 @@ const JS_ANALIZAR = `(function(){
   var host=location.host;
   var obst=null;
   if(/clave\\.gob\\.es/i.test(host)) obst='clave';
-  if(!obst && todo(document.querySelectorAll('input[type=password]')).some(vis)) obst='login';
+  var claves=todo(document.querySelectorAll('input[type=password]')).filter(vis).length;
+  if(!obst && claves>=2) obst='registro';
+  if(!obst && claves>=1 && /crea(r)? (tu |una )?cuenta|reg[ií]strate|registro de candidat|nuevo usuario|darte de alta|sign up|create (an )?account/i.test(texto.slice(0,6000)) && !/ya tienes cuenta|iniciar sesi[oó]n|accede con|log ?in/i.test(texto.slice(0,600))) obst='registro';
+  if(!obst && claves>=1) obst='login';
   var cap=document.querySelector('iframe[src*="recaptcha"],iframe[src*="hcaptcha"],iframe[src*="turnstile"],iframe[src*="captcha"],.g-recaptcha,.h-captcha,.cf-turnstile');
   if(cap && vis(cap)) obst='captcha';
   if(!obst && /verify you are human|no soy un robot|comprobando que eres humano|checking your browser|verifica que eres humano/i.test(texto.slice(0,3000))) obst='captcha';
@@ -209,7 +212,8 @@ function textoObstaculo(tipo, nombre, intento) {
   const donde = nombre ? ' en ' + nombre : '';
   const base = {
     clave: 'Te toca: identifícate con Cl@ve o con tu certificado digital' + donde + '.',
-    login: 'Te toca: inicia sesión' + donde + ' (o crea tu cuenta si aún no la tienes).',
+    login: 'Te toca: inicia sesión' + donde + '. Si aún no tienes cuenta, créala ahí mismo (usa tu correo y una contraseña que puedas recordar, y apúntala).',
+    registro: 'Te toca: crea tu cuenta de candidato' + donde + ' con tu correo y una contraseña (apúntala para no olvidarla). Si te envían un correo de confirmación, ábrelo y vuelve aquí.',
     captcha: 'Te toca: resuelve la verificación («no soy un robot»)' + donde + '.',
     codigo: 'Te toca: escribe el código que te han enviado por SMS o correo' + donde + '.'
   }[tipo] || 'Te toca: completa este paso' + donde + '.';

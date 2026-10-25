@@ -151,6 +151,9 @@ label.campo { display: block; font-weight: 600; margin: 14px 0 6px; }
 }
 @keyframes gira { to { transform: rotate(360deg); } }
 
+.foto-fila { display: flex; gap: 14px; align-items: center; margin: 8px 0; }
+.foto-mini { width: 96px; height: 96px; border-radius: 50%; object-fit: cover; border: 3px solid var(--primario-claro); flex: none; }
+.foto-mini.vacia { display: flex; align-items: center; justify-content: center; font-size: 44px; background: var(--primario-claro); }
 .pasos { padding-left: 22px; margin: 8px 0 12px; }
 .pasos li { margin-bottom: 6px; }
 

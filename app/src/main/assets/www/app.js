@@ -668,7 +668,9 @@ function pMisCv() {
 
   pantalla('Mis CV',
     (lista || '<div class="tarjeta"><h3>Aún no tienes CV creados</h3><p class="suave">Sube tu CV actual y te ayudo a crear versiones mejores.</p></div>') +
-    (E.preferencias ? '<button class="boton" data-ir="orientaciones">Crear otro CV</button>' : '<button class="boton" data-ir="subir">Subir mi CV</button>'));
+    (E.preferencias ? '<button class="boton" data-ir="orientaciones">Crear otro CV</button>' : '<button class="boton" data-ir="subir">Subir mi CV</button>') +
+    htmlFotoYDiseno());
+  activarFotoYDiseno(pMisCv);
 }
 
 function pCv(id) {
@@ -680,11 +682,13 @@ function pCv(id) {
     '<p class="suave">Así queda tu CV. Toca "Guardar en PDF" y elige <b>Guardar como PDF</b> en la pantalla que aparece.</p>' +
     '<div class="vista-cv" id="marco"><iframe id="cv-frame" title="Vista del CV"></iframe></div>' +
     '<button class="boton" id="pdf">⬇️  Guardar en PDF</button>' +
+    htmlFotoYDiseno() +
     '<label class="campo" for="cambios">¿Quieres cambiar algo?</label>' +
     '<textarea id="cambios" placeholder="Por ejemplo: quita la experiencia de 2009, pon el teléfono 600 000 000, haz el resumen más corto…"></textarea>' +
     '<button class="boton secundario" id="aplicar">Aplicar cambios</button>' +
     '<button class="boton peligro" id="borrar">Borrar este CV</button>');
 
+  activarFotoYDiseno(() => pCv(id));
   const frame = $('#cv-frame');
   const ajustar = () => {
     try {
