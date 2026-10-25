@@ -101,7 +101,7 @@ function pPaso(arg) {
   const editar = partes[1] === 'editar';
   const num = PASOS.indexOf(paso);
   const terminar = () => {
-    if (editar) { ir('ajustes'); return; }
+    if (editar) { ofrecerReinicio(() => ir('ajustes')); return; }
     if (num < PASOS.length - 1) { ir('paso/' + PASOS[num + 1]); return; }
     E.bienvenida = true;
     guardar();

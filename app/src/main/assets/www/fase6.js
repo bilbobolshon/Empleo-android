@@ -147,8 +147,10 @@ function prepararCandidaturas(ofertas) {
   });
   if (listas.length) {
     guardar();
-    if (!envioDirecto()) notificarUsuario(listas.length === 1 ? 'Candidatura lista para enviar' : listas.length + ' candidaturas listas para enviar',
-      listas.slice(0, 3).map((c) => c.titulo + (c.empresa ? ' — ' + c.empresa : '')).join('\n') + '\nAbre la app y pulsa «Presentarme a todas».');
+    if (modoEnvio() !== 'auto') notificarUsuario(
+      modoEnvio() === 'permiso' ? (listas.length === 1 ? '¿Envío tu CV? Necesito tu permiso' : listas.length + ' candidaturas esperan tu permiso')
+        : (listas.length === 1 ? 'Candidatura lista para enviar' : listas.length + ' candidaturas listas para enviar'),
+      listas.slice(0, 3).map((c) => c.titulo + (c.empresa ? ' — ' + c.empresa : '')).join('\n') + '\nÁbrelas en el inicio de la app.');
   }
   return listas;
 }
@@ -182,7 +184,21 @@ async function presentarEnCadena() {
 }
 
 function urgentesAuto() {
-  const n = E.candidaturas.filter((c) => c.estado === 'lista').length;
+  const listas = E.candidaturas.filter((c) => c.estado === 'lista');
+  const n = listas.length;
+  if (n && modoEnvio() === 'permiso') {
+    return '<div class="tarjeta urgente"><div class="etiqueta">Esperan tu permiso</div><h3>' +
+      (n === 1 ? '¿Envío este CV?' : '¿Envío estos ' + n + ' CV?') + '</h3>' +
+      listas.slice(0, 8).map((c) => {
+        const cv = E.cvs.find((x) => x.id === c.cv);
+        return '<div class="permiso"><b>' + esc(c.titulo) + '</b>' + (c.empresa ? ' — ' + esc(c.empresa) : '') +
+          '<br><span class="suave">CV: ' + esc(cv ? cv.titulo : '—') + '</span>' +
+          '<div class="fila"><button class="boton" data-accion="permiso-si:' + c.id + '">Enviar</button>' +
+          '<button class="boton secundario" data-accion="permiso-no:' + c.id + '">No</button>' +
+          (c.url ? '<button class="boton texto" data-accion="ver:' + esc(c.url) + '">Ver</button>' : '') + '</div></div>';
+      }).join('') +
+      (n > 1 ? '<button class="boton" data-accion="permiso-todas">Enviar todas</button>' : '') + '</div>';
+  }
   return n ? '<div class="tarjeta urgente"><div class="etiqueta">Pendiente de ti</div><h3>' + n +
     (n === 1 ? ' candidatura lista para enviar' : ' candidaturas listas para enviar') + '</h3>' +
     '<p class="suave">Las abro y relleno una tras otra; tú revisas y pulsas enviar.</p>' +

@@ -165,6 +165,7 @@ label.campo { display: block; font-weight: 600; margin: 14px 0 6px; }
 #carga-tiempo { margin: 8px 0 0; font-variant-numeric: tabular-nums; }
 #carga-progreso { margin: 12px 0 0; }
 .editor-bloque { background: #FAFBFD; }
+.permiso { border-top: 1px solid #F2D6A8; padding-top: 10px; margin-top: 10px; }
 .pasos { padding-left: 22px; margin: 8px 0 12px; }
 .pasos li { margin-bottom: 6px; }
 

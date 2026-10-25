@@ -5,7 +5,10 @@
 // la deja «Pendiente de ti» con el motivo.
 
 const MAX_ENVIOS_DIA = 15;
-const envioDirecto = () => E.ajustes.envioDirecto !== false;
+// Modo de envío: 'auto' (la app envía sola), 'permiso' (pregunta antes de cada una), 'manual' (el usuario pulsa enviar)
+const modoEnvio = () => E.ajustes.modoEnvio || (E.ajustes.envioDirecto === false ? 'manual' : 'auto');
+// La app termina y envía ella sola (en 'permiso', una vez que el usuario ha dado el permiso)
+const envioDirecto = () => modoEnvio() !== 'manual';
 
 function enviosHoy() {
   const hoy = new Date().toISOString().slice(0, 10);
@@ -219,12 +222,12 @@ function prepararEspontaneas() {
 
 let enviando = false;
 
-async function enviarListas(deUsuario) {
+async function enviarListas(deUsuario, soloEstas) {
   if (enviando || !envioDirecto()) return { enviadas: 0, pendientes: 0 };
   enviando = true;
   let enviadas = 0, pendientes = 0;
   try {
-    const lista = E.candidaturas.filter((c) => c.estado === 'lista');
+    const lista = soloEstas || E.candidaturas.filter((c) => c.estado === 'lista');
     for (let k = 0; k < lista.length; k++) {
       if (enviosHoy().n >= MAX_ENVIOS_DIA) break;
       const c = lista[k];
@@ -259,13 +262,16 @@ async function enviarListas(deUsuario) {
 }
 
 function htmlEnvioDirecto() {
+  const m = modoEnvio();
+  const op = (v, t) => '<option value="' + v + '"' + (m === v ? ' selected' : '') + '>' + t + '</option>';
   return '<label class="campo" for="envio-directo">Envío de candidaturas</label>' +
     '<select id="envio-directo">' +
-    '<option value="si"' + (envioDirecto() ? ' selected' : '') + '>La app las envía sola y me avisa</option>' +
-    '<option value="no"' + (!envioDirecto() ? ' selected' : '') + '>Quiero revisarlas y enviarlas yo</option>' +
+    op('auto', 'Enviarlas sola y avisarme') +
+    op('permiso', 'Pedirme permiso antes de enviar cada una') +
+    op('manual', 'Rellenarlas y que yo pulse «Enviar»') +
     '</select><p class="suave">Máximo ' + MAX_ENVIOS_DIA + ' envíos al día. Si una web pide entrar, una verificación o un dato que no tengo, te la dejo pendiente.</p>';
 }
 
 document.addEventListener('change', (ev) => {
-  if (ev.target && ev.target.id === 'envio-directo') { E.ajustes.envioDirecto = ev.target.value === 'si'; guardar(); }
+  if (ev.target && ev.target.id === 'envio-directo') { E.ajustes.modoEnvio = ev.target.value; guardar(); pintar(); }
 });

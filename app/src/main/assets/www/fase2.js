@@ -212,8 +212,9 @@ async function revisarTodo(deUsuario) {
       listas = prepararCandidaturas(nuevas);
     }
     listas = listas.concat(prepararEspontaneas());
-    if (envioDirecto() && E.candidaturas.some((c) => c.estado === 'lista')) envio = await enviarListas(deUsuario);
+    if (modoEnvio() === 'auto' && E.candidaturas.some((c) => c.estado === 'lista')) envio = await enviarListas(deUsuario);
     E.ultimaRevision = Date.now();
+    E.firmaBusquedaUltima = firmaBusqueda();
     guardar();
   } catch (err) {
     revisando = false;
@@ -238,7 +239,7 @@ async function revisarTodo(deUsuario) {
       '• Ofertas nuevas: ' + nuevas.length + (nuevas.length ? ' (' + buenas.length + ' encajan contigo)' : '') + '\n' +
       (envio.enviadas ? '• CV enviados por la app: ' + envio.enviadas + '\n' : '') +
       (envio.pendientes ? '• Candidaturas que necesitan algo de ti: ' + envio.pendientes + '\n' : '') +
-      (!envioDirecto() && listas.length ? '• Candidaturas preparadas para enviar: ' + listas.length + '\n' : '') +
+      (modoEnvio() !== 'auto' && listas.length ? '• Candidaturas preparadas' + (modoEnvio() === 'permiso' ? ', esperando tu permiso: ' : ': ') + listas.length + '\n' : '') +
       (cambiosCursos.length ? '• Cambios en tus cursos: ' + cambiosCursos.length + '\n' : '') +
       (accesos.length ? '• Necesitan que entres tú: ' + accesos.map((s) => s.nombre).join(', ') : ''),
       [{ texto: buenas.length ? 'Ver ofertas' : 'Volver al inicio', accion: () => ir(buenas.length ? 'ofertas' : 'inicio') }]);
@@ -469,6 +470,7 @@ function pEmpresas() {
     : s.estado === 'error' ? '⚠️ No se pudo leer' : s.ultima ? '✅ Revisada ' + hora(s.ultima) : '⏳ Sin revisar';
 
   pantalla('Empresas y portales',
+    (busquedaCambiada() ? htmlReiniciar() : '') +
     htmlPortales() +
     '<h3>Empresas</h3>' +
     '<p class="suave">Añado yo sola las empresas que encajan con lo que buscas (por ejemplo, si buscas de cajero o reponedor: supermercados y tiendas) y reviso sus webs de empleo. Quita las que no quieras y añade las tuyas.</p>' +
@@ -600,6 +602,7 @@ function pOfertas(arg) {
   pantalla('Ofertas',
     '<button class="boton" data-accion="revisar">🔄 Buscar ofertas ahora</button>' +
     (E.ultimaRevision ? '<p class="suave centro">Última búsqueda: ' + hora(E.ultimaRevision) + '</p>' : '') +
+    htmlReiniciar() +
     '<label class="campo" for="umbral">Mostrar ofertas con nota</label><select id="umbral">' + opciones + '</select>' +
     htmlAutoAjuste() +
     htmlEnvioDirecto() +

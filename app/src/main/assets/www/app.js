@@ -298,7 +298,7 @@ function pInicio() {
   } else if (!sitiosRevisables().length) {
     urgente = tarjetaUrgente('Siguiente paso', 'Dime dónde buscar', 'Configura LABORA y añade empresas para que busque ofertas por ti.', 'empresas');
   }
-  urgente += urgentesDemanda() + urgentesAuto() + urgentesFase2() + urgentesCorreo();
+  urgente += (busquedaCambiada() ? htmlReiniciar() : '') + urgentesDemanda() + urgentesAuto() + urgentesFase2() + urgentesCorreo();
   if (!urgente) {
     urgente = '<div class="tarjeta bien"><div class="etiqueta">Todo al día</div>' +
       '<h3>No tienes nada pendiente</h3><p class="suave">Sigo vigilando tus webs. Te aviso cuando haya algo.</p></div>';
@@ -374,6 +374,9 @@ function pAjustes() {
     '<p class="suave centro">Consultas a la IA hoy: ' + usos + '</p></div>' +
 
     htmlAjustesBienvenida() +
+    '<div class="tarjeta"><h3>Búsqueda y envío</h3>' + htmlEnvioDirecto() +
+    '<p class="suave">Si cambias lo que buscas, el ámbito o los portales, reinicia la búsqueda para actualizar las ofertas.</p>' +
+    '<button class="boton secundario" data-accion="reiniciar-busqueda">🔁 Reiniciar búsqueda</button></div>' +
     '<div class="tarjeta"><h3>Tus datos</h3>' +
     '<p class="suave">Todo se guarda solo en este móvil. ' +
     (E.fuentes.length ? 'CV subidos: ' + E.fuentes.map(esc).join(', ') + '.' : 'Aún no has subido ningún CV.') + '</p>' +
@@ -640,6 +643,7 @@ function pBusqueda(arg) {
     const marcados = document.querySelectorAll('.marca.marcada').length;
     if (!marcados) { mensaje('Deja marcado al menos un puesto o sector, o pulsa "Marcar todo".'); return; }
     if (seguir) ir('orientaciones');
+    else if (busquedaCambiada()) ofrecerReinicio(() => ir('inicio'));
     else mensaje('Guardado. Buscaré en ' + marcados + ' puestos y sectores.', [{ texto: 'Volver al inicio', accion: () => ir('inicio') }]);
   };
 }
