@@ -174,6 +174,7 @@ async function revisarTodo(deUsuario) {
   if (revisando) { if (deUsuario) mensaje('Ya estoy revisando. Te aviso al terminar.'); return; }
   if (!iaLista()) { if (deUsuario) fallo(new Error('SIN_CLAVE')); return; }
   if (!Nav.disponible()) { if (deUsuario) mensaje('La revisión de webs solo funciona dentro de la app del móvil.'); return; }
+  asegurarPortales();
   const sitios = sitiosRevisables();
   if (!sitios.length) {
     if (deUsuario) mensaje('Aún no hay webs que revisar. Añade empresas o configura LABORA.', [{ texto: 'Añadir empresas', accion: () => ir('empresas') }, { texto: 'Configurar LABORA', accion: () => ir('labora') }]);
@@ -425,12 +426,14 @@ function revisarUno(id) {
 // ---------- Empresas y webs ----------
 
 function pEmpresas() {
-  const lista = E.sitios.filter((s) => s.id !== 'labora');
+  const lista = E.sitios.filter((s) => s.id !== 'labora' && s.origen !== 'portal');
   const estado = (s) => s.estado === 'acceso' ? '🔑 Necesita que entres tú'
     : s.estado === 'error' ? '⚠️ No se pudo leer' : s.ultima ? '✅ Revisada ' + hora(s.ultima) : '⏳ Sin revisar';
 
-  pantalla('Empresas y webs',
-    '<p class="suave">Estas webs las reviso yo cada cierto tiempo para buscarte ofertas. Puedes añadir empresas, o pegar el enlace de una búsqueda de InfoJobs, Indeed u otro portal.</p>' +
+  pantalla('Empresas y portales',
+    htmlPortales() +
+    '<h3>Empresas</h3>' +
+    '<p class="suave">Estas webs las reviso yo cada cierto tiempo para buscarte ofertas. Puedes añadir empresas, o pegar el enlace de cualquier otra web de empleo.</p>' +
     '<button class="boton" data-accion="proponer">✨ Proponer empresas afines a mi perfil</button>' +
     '<label class="campo" for="nueva-empresa">Añadir una empresa o web</label>' +
     '<input type="text" id="nueva-empresa" placeholder="Nombre (ej.: Mercadona) o enlace">' +

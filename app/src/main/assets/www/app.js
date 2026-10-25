@@ -268,6 +268,7 @@ function tipoArchivo(file) {
 // ---------- Pantallas ----------
 
 function pInicio() {
+  asegurarPortales();
   const n = nombreCorto();
   let urgente = '';
   const sinResponder = E.preguntas.findIndex((p) => !E.respuestas[p.id]);
@@ -302,7 +303,7 @@ function pInicio() {
       mosaico('🔎', 'Ofertas', libres ? libres + ' para ti' : 'Ver ofertas', 'ofertas') +
       mosaico('📋', 'Candidaturas', activas ? activas + ' en marcha' : 'Ninguna aún', 'candidaturas') +
       mosaico('🏛️', 'LABORA', labora && lleno(labora.paginas).length ? 'Configurado' : 'Configurar', 'labora') +
-      mosaico('🏢', 'Empresas', Math.max(0, E.sitios.filter((s) => s.id !== 'labora').length) + ' en tu lista', 'empresas') +
+      mosaico('🏢', 'Empresas', Math.max(0, E.sitios.filter((s) => s.id !== 'labora' && s.origen !== 'portal').length) + ' + portales', 'empresas') +
       mosaico('📄', 'Mis CV', E.cvs.length ? E.cvs.length + ' creados' : 'Ninguno aún', 'miscv') +
       mosaico('🎯', 'Qué busco', E.busqueda && E.busqueda.quitados.length ? 'Afinado' : 'Todo', 'busqueda') +
       mosaico('📤', 'Subir CV', 'PDF o foto', 'subir') +
