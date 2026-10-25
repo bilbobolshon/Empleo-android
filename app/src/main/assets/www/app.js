@@ -269,6 +269,7 @@ function tipoArchivo(file) {
 
 function pInicio() {
   asegurarPortales();
+  asegurarEmpresasAuto();
   const n = nombreCorto();
   let urgente = '';
   const sinResponder = E.preguntas.findIndex((p) => !E.respuestas[p.id]);
@@ -285,7 +286,7 @@ function pInicio() {
   } else if (!sitiosRevisables().length) {
     urgente = tarjetaUrgente('Siguiente paso', 'Dime dónde buscar', 'Configura LABORA y añade empresas para que busque ofertas por ti.', 'empresas');
   }
-  urgente += urgentesFase2() + urgentesCorreo();
+  urgente += urgentesAuto() + urgentesFase2() + urgentesCorreo();
   if (!urgente) {
     urgente = '<div class="tarjeta bien"><div class="etiqueta">Todo al día</div>' +
       '<h3>No tienes nada pendiente</h3><p class="suave">Sigo vigilando tus webs. Te aviso cuando haya algo.</p></div>';

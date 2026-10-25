@@ -78,11 +78,13 @@ function resumenPerfil() {
 }
 
 function promptExtraer(s, pg, a) {
-  const enlaces = (a.enlaces || []).slice(0, 250).map((x) => x.t + ' | ' + x.h).join('\n');
+  const directo = (h) => { const m = h.match(/duckduckgo\.com\/l\/\?.*?uddg=([^&]+)/); try { return m ? decodeURIComponent(m[1]) : h; } catch (e) { return h; } };
+  const enlaces = (a.enlaces || []).slice(0, 250).map((x) => x.t + ' | ' + directo(x.h)).join('\n');
   const cursos = pg.tipo === 'cursos';
   return [
     'Esta es una página web de "' + s.nombre + '" (' + a.url + ').',
     'La app la ha abierto para ' + (cursos ? 'leer los cursos de formación del usuario y su estado.' : 'buscar ofertas de empleo.'),
+    /duckduckgo\.com/.test(a.url) ? 'Es una página de resultados de un buscador: cada resultado que sea una oferta de empleo concreta cuenta como oferta; su "url" es el enlace del resultado.' : '',
     '',
     'TEXTO DE LA PÁGINA:', '<<<', (a.texto || '').slice(0, 25000), '>>>',
     '', 'ENLACES (texto | dirección):', enlaces,
@@ -182,9 +184,12 @@ async function revisarTodo(deUsuario) {
   }
   revisando = true;
   refrescarSiInicio();
-  let nuevas = [], cambiosCursos = [];
+  let nuevas = [], cambiosCursos = [], listas = [];
   const accesos = [];
   try {
+    await prepararEmpresas(deUsuario);
+    const todos = sitiosRevisables();
+    sitios.splice(0, sitios.length, ...todos);
     await Nav.cola(async () => {
       for (let k = 0; k < sitios.length; k++) {
         const s = sitios[k];
@@ -199,6 +204,7 @@ async function revisarTodo(deUsuario) {
     if (nuevas.length) {
       if (deUsuario) cargando('Valorando ' + nuevas.length + ' ofertas nuevas…');
       await valorar(nuevas);
+      listas = prepararCandidaturas(nuevas);
     }
     E.ultimaRevision = Date.now();
     guardar();
@@ -221,6 +227,7 @@ async function revisarTodo(deUsuario) {
   if (deUsuario) {
     mensaje('Revisión terminada.\n\n' +
       '• Ofertas nuevas: ' + nuevas.length + (nuevas.length ? ' (' + buenas.length + ' encajan contigo)' : '') + '\n' +
+      (listas.length ? '• Candidaturas preparadas para enviar: ' + listas.length + '\n' : '') +
       (cambiosCursos.length ? '• Cambios en tus cursos: ' + cambiosCursos.length + '\n' : '') +
       (accesos.length ? '• Necesitan que entres tú: ' + accesos.map((s) => s.nombre).join(', ') : ''),
       [{ texto: buenas.length ? 'Ver ofertas' : 'Volver al inicio', accion: () => ir(buenas.length ? 'ofertas' : 'inicio') }]);
@@ -426,15 +433,20 @@ function revisarUno(id) {
 // ---------- Empresas y webs ----------
 
 function pEmpresas() {
+  asegurarEmpresasAuto();
   const lista = E.sitios.filter((s) => s.id !== 'labora' && s.origen !== 'portal');
-  const estado = (s) => s.estado === 'acceso' ? '🔑 Necesita que entres tú'
+  const pendientes = lista.filter((s) => s.pendienteWeb).length;
+  const estado = (s) => s.pendienteWeb ? '🔎 Buscaré su web de empleo en la próxima revisión'
+    : s.estado === 'sinweb' ? '❔ No encontré su web de empleo: pega el enlace si lo conoces'
+    : s.estado === 'acceso' ? '🔑 Necesita que entres tú'
     : s.estado === 'error' ? '⚠️ No se pudo leer' : s.ultima ? '✅ Revisada ' + hora(s.ultima) : '⏳ Sin revisar';
 
   pantalla('Empresas y portales',
     htmlPortales() +
     '<h3>Empresas</h3>' +
-    '<p class="suave">Estas webs las reviso yo cada cierto tiempo para buscarte ofertas. Puedes añadir empresas, o pegar el enlace de cualquier otra web de empleo.</p>' +
-    '<button class="boton" data-accion="proponer">✨ Proponer empresas afines a mi perfil</button>' +
+    '<p class="suave">Añado yo sola las empresas que encajan con lo que buscas (por ejemplo, si buscas de cajero o reponedor: supermercados y tiendas) y reviso sus webs de empleo. Quita las que no quieras y añade las tuyas.</p>' +
+    (pendientes ? '<button class="boton" data-accion="buscar-webs">🔎 Buscar ahora la web de ' + pendientes + ' empresas</button>' : '') +
+    '<button class="boton secundario" data-accion="proponer">✨ Proponer más empresas de mi zona</button>' +
     '<label class="campo" for="nueva-empresa">Añadir una empresa o web</label>' +
     '<input type="text" id="nueva-empresa" placeholder="Nombre (ej.: Mercadona) o enlace">' +
     '<button class="boton secundario" data-accion="anadir-empresa">Añadir</button>' +
@@ -444,8 +456,8 @@ function pEmpresas() {
       return '<div class="tarjeta"><h3>' + esc(s.nombre) + '</h3>' +
         '<p class="suave">' + esc(host(url)) + (s.motivo ? ' · ' + esc(s.motivo) : '') + '<br>' + estado(s) + '</p>' +
         '<div class="fila">' +
-          (s.estado === 'acceso' ? '<button class="boton" data-accion="entrar:' + s.id + '">Entrar</button>' : '<button class="boton secundario" data-accion="ver:' + esc(url) + '">Ver web</button>') +
-          '<button class="boton peligro" data-accion="quitar-sitio:' + s.id + '">Quitar</button>' +
+          (s.estado === 'acceso' ? '<button class="boton" data-accion="entrar:' + s.id + '">Entrar</button>' : url ? '<button class="boton secundario" data-accion="ver:' + esc(url) + '">Ver web</button>' : '') +
+          '<button class="boton peligro" data-accion="' + (s.origen === 'manual' ? 'quitar-sitio:' : 'quitar-auto:') + s.id + '">Quitar</button>' +
         '</div></div>';
     }).join('') : '<p class="suave">Tu lista está vacía. Pulsa «Proponer empresas» o añade las tuyas.</p>'));
 }
@@ -562,6 +574,7 @@ function pOfertas(arg) {
     '<button class="boton" data-accion="revisar">🔄 Buscar ofertas ahora</button>' +
     (E.ultimaRevision ? '<p class="suave centro">Última búsqueda: ' + hora(E.ultimaRevision) + '</p>' : '') +
     '<label class="campo" for="umbral">Mostrar ofertas con nota</label><select id="umbral">' + opciones + '</select>' +
+    htmlAutoAjuste() +
     (visibles.length ? visibles.slice(0, 60).map(tarjetaOferta).join('')
       : '<div class="tarjeta"><h3>Sin ofertas por ahora</h3><p class="suave">Pulsa «Buscar ofertas ahora». Busco en LABORA y en las empresas de tu lista.</p></div>') +
     (ocultas > 0 && !todas ? '<button class="boton texto" data-ir="ofertas/todas">Ver también ' + ocultas + ' con nota más baja</button>' : ''));
@@ -579,7 +592,8 @@ const ESTADOS = {
   enviada: { t: 'Enviada', c: 'b' },
   respondida: { t: 'Te han respondido', c: 'a' },
   entrevista: { t: 'Entrevista', c: 'a' },
-  descartada: { t: 'Descartada', c: 'x' }
+  descartada: { t: 'Descartada', c: 'x' },
+  lista: { t: 'Lista para enviar', c: 'c' }
 };
 
 function siguientePaso(c) {
@@ -608,7 +622,7 @@ function pCandidatura(id) {
   if (!c) { ir('candidaturas'); return; }
   const e = ESTADOS[c.estado] || ESTADOS.preparando;
   const cv = E.cvs.find((x) => x.id === c.cv);
-  const pendiente = c.estado === 'pendiente_ti' || c.estado === 'preparando';
+  const pendiente = c.estado === 'pendiente_ti' || c.estado === 'preparando' || c.estado === 'lista';
 
   pantalla('Candidatura',
     '<span class="estado-c e' + e.c + '">' + e.t + '</span><h2>' + esc(c.titulo) + '</h2>' +
@@ -649,13 +663,13 @@ function pausar(c, motivo) {
 }
 
 // Rellena la candidatura en la web; pasa a manual para accesos y para el envío final
-function presentarme(ofertaId) {
+function presentarme(ofertaId, enCadena) {
   const o = E.ofertas.find((x) => x.id === ofertaId);
-  if (!o) { mensaje('No encuentro esa oferta.'); return; }
-  if (!E.cvs.length) { mensaje('Primero crea al menos un CV.', [{ texto: 'Ir a Mis CV', accion: () => ir('miscv') }]); return; }
-  if (!o.url) { mensaje('Esta oferta no tiene enlace para presentarse.'); return; }
-  if (!Nav.disponible()) { mensaje('Las candidaturas solo funcionan dentro de la app del móvil.'); return; }
-  if (Nav.ocupado) { mensaje('Estoy terminando otra tarea (por ejemplo, una revisión). Inténtalo en unos segundos.'); return; }
+  if (!o) { if (!enCadena) mensaje('No encuentro esa oferta.'); return Promise.resolve(); }
+  if (!E.cvs.length) { mensaje('Primero crea al menos un CV.', [{ texto: 'Ir a Mis CV', accion: () => ir('miscv') }]); return Promise.resolve(); }
+  if (!o.url) { if (!enCadena) mensaje('Esta oferta no tiene enlace para presentarse.'); return Promise.resolve(); }
+  if (!Nav.disponible()) { mensaje('Las candidaturas solo funcionan dentro de la app del móvil.'); return Promise.resolve(); }
+  if (Nav.ocupado && !enCadena) { mensaje('Estoy terminando otra tarea (por ejemplo, una revisión). Inténtalo en unos segundos.'); return; }
 
   const cv = E.cvs.find((x) => x.id === o.cv) || E.cvs[0];
   let c = E.candidaturas.find((x) => x.oferta === o.id);
@@ -670,7 +684,7 @@ function presentarme(ofertaId) {
   guardar();
   const cvUsado = E.cvs.find((x) => x.id === c.cv) || cv;
 
-  Nav.cola(async () => {
+  return Nav.cola(async () => {
     Nav.panel('Abriendo la oferta…', [{ id: 'cancelar', texto: 'Cancelar' }]);
     await Nav.abrir(c.url);
     if (Nav.tomarBotonSuelto() === 'cancelar') { pausar(c, 'La cancelaste al abrirla'); Nav.ocultar(); return; }
@@ -721,10 +735,10 @@ function presentarme(ofertaId) {
       pausar(c, 'No la enviaste');
       break;
     }
-    Nav.ocultar();
+    if (!enCadena) Nav.ocultar();
     guardar();
-    ir('candidatura/' + c.id);
-  }).catch((err) => { Nav.ocultar(); pausar(c, 'Se interrumpió por un error'); fallo(err); });
+    if (!enCadena) ir('candidatura/' + c.id);
+  }).catch((err) => { Nav.ocultar(); pausar(c, 'Se interrumpió por un error'); if (!enCadena) fallo(err); });
 }
 
 // Rellena sin IA los campos básicos (nombre, apellidos, correo, teléfono, localidad).
