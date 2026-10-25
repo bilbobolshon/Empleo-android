@@ -19,7 +19,12 @@ function estadoInicial() {
     respuestas: {},
     preferencias: null,
     orientaciones: [],
-    cvs: []               // CV creados
+    cvs: [],              // CV creados
+    sitios: [],           // LABORA, empresas y webs vigiladas
+    ofertas: [],
+    cursos: [],
+    candidaturas: [],
+    ultimaRevision: 0
   };
 }
 
@@ -111,7 +116,7 @@ function nombreCorto() {
 
 // ---------- Conexión con la IA (Claude) ----------
 
-async function ia(contenido, maxTokens) {
+async function llamadaIA(cuerpo) {
   if (!E.ajustes.apiKey) throw new Error('SIN_CLAVE');
   let r;
   try {
@@ -123,12 +128,7 @@ async function ia(contenido, maxTokens) {
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true'
       },
-      body: JSON.stringify({
-        model: E.ajustes.modelo,
-        max_tokens: maxTokens || 8000,
-        system: SISTEMA,
-        messages: [{ role: 'user', content: contenido }]
-      })
+      body: JSON.stringify(Object.assign({ model: E.ajustes.modelo, max_tokens: 8000, system: SISTEMA }, cuerpo))
     });
   } catch (err) {
     throw new Error('No hay conexión con la IA. Comprueba que tienes internet y vuelve a intentarlo.');
@@ -139,10 +139,15 @@ async function ia(contenido, maxTokens) {
     if (r.status === 401) throw new Error('La clave de la IA no es válida. Revísala en Ajustes.');
     if (r.status === 429 || r.status === 529 || r.status === 503) throw new Error('La IA está saturada ahora mismo. Espera un minuto y vuelve a intentarlo.');
     if (/credit|balance/i.test(m)) throw new Error('Tu cuenta de la IA no tiene saldo. Añade crédito en console.anthropic.com.');
-    if (/model/i.test(m)) throw new Error('El modelo de IA elegido no está disponible. Cambia el modelo en Ajustes.\n\n(' + m + ')');
+    if (/model/i.test(m) && !/tool/i.test(m)) throw new Error('El modelo de IA elegido no está disponible. Cambia el modelo en Ajustes.\n\n(' + m + ')');
     throw new Error('La IA ha devuelto un error (' + r.status + ').\n' + m);
   }
   if (d.stop_reason === 'max_tokens') throw new Error('La respuesta de la IA era demasiado larga y se cortó. Vuelve a intentarlo.');
+  return d;
+}
+
+async function ia(contenido, maxTokens) {
+  const d = await llamadaIA({ max_tokens: maxTokens || 8000, messages: [{ role: 'user', content: contenido }] });
   return (d.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
 }
 
@@ -199,7 +204,7 @@ function tipoArchivo(file) {
 
 function pInicio() {
   const n = nombreCorto();
-  let urgente;
+  let urgente = '';
   const sinResponder = E.preguntas.findIndex((p) => !E.respuestas[p.id]);
   if (!E.ajustes.apiKey) {
     urgente = tarjetaUrgente('Para empezar', 'Conecta la IA', 'Es lo que lee tus CV y los mejora. Te explico cómo en un minuto.', 'ajustes');
@@ -211,20 +216,31 @@ function pInicio() {
       'preguntas/' + Math.max(0, sinResponder));
   } else if (E.preferencias && !E.cvs.length) {
     urgente = tarjetaUrgente('Siguiente paso', 'Elige qué CV crear', 'Ya tengo propuestas preparadas para ti.', 'orientaciones');
-  } else {
-    urgente = '<div class="tarjeta bien"><div class="etiqueta">Todo al día</div>' +
-      '<h3>Tus CV están listos</h3><p class="suave">Tienes ' + E.cvs.length + ' CV creados. Pronto la app buscará ofertas por ti.</p></div>';
+  } else if (!sitiosRevisables().length) {
+    urgente = tarjetaUrgente('Siguiente paso', 'Dime dónde buscar', 'Configura LABORA y añade empresas para que busque ofertas por ti.', 'empresas');
   }
+  urgente += urgentesFase2();
+  if (!urgente) {
+    urgente = '<div class="tarjeta bien"><div class="etiqueta">Todo al día</div>' +
+      '<h3>No tienes nada pendiente</h3><p class="suave">Sigo vigilando tus webs. Te aviso cuando haya algo.</p></div>';
+  }
+  const libres = E.ofertas.filter((o) => o.estado === 'nueva' && (o.nota || 0) >= umbral()).length;
+  const activas = E.candidaturas.filter((c) => c.estado !== 'descartada').length;
+  const labora = E.sitios.find((s) => s.id === 'labora');
 
   pantalla('Mi Empleo',
     '<h2>Hola' + (n ? ', ' + esc(n) : '') + '</h2>' +
     urgente +
+    (sitiosRevisables().length ? '<button class="boton secundario" data-accion="revisar">' +
+      (revisando ? '⏳ Revisando tus webs…' : '🔄 Buscar ofertas ahora') + '</button>' : '') +
     '<div class="rejilla">' +
+      mosaico('🔎', 'Ofertas', libres ? libres + ' para ti' : 'Ver ofertas', 'ofertas') +
+      mosaico('📋', 'Candidaturas', activas ? activas + ' en marcha' : 'Ninguna aún', 'candidaturas') +
+      mosaico('🏛️', 'LABORA', labora && lleno(labora.paginas).length ? 'Configurado' : 'Configurar', 'labora') +
+      mosaico('🏢', 'Empresas', Math.max(0, E.sitios.filter((s) => s.id !== 'labora').length) + ' en tu lista', 'empresas') +
       mosaico('📄', 'Mis CV', E.cvs.length ? E.cvs.length + ' creados' : 'Ninguno aún', 'miscv') +
-      mosaico('📤', 'Subir CV', 'PDF o foto', 'subir') +
       mosaico('🎯', 'Qué busco', E.busqueda && E.busqueda.quitados.length ? 'Afinado' : 'Todo', 'busqueda') +
-      mosaico('🔎', 'Ofertas', 'Próximamente', '', true) +
-      mosaico('📋', 'Candidaturas', 'Próximamente', '', true) +
+      mosaico('📤', 'Subir CV', 'PDF o foto', 'subir') +
       mosaico('✉️', 'Correo', 'Próximamente', '', true) +
       mosaico('⚙️', 'Ajustes', E.ajustes.apiKey ? 'IA conectada' : 'Falta la IA', 'ajustes') +
     '</div>', false);
@@ -634,7 +650,12 @@ const RUTAS = {
   orientaciones: pOrientaciones,
   busqueda: pBusqueda,
   miscv: pMisCv,
-  cv: pCv
+  cv: pCv,
+  ofertas: pOfertas,
+  candidaturas: pCandidaturas,
+  candidatura: pCandidatura,
+  labora: pLabora,
+  empresas: pEmpresas
 };
 
 function pintar() {
@@ -658,3 +679,4 @@ $('#atras').onclick = () => {
 
 window.addEventListener('hashchange', pintar);
 pintar();
+setTimeout(revisionAutomatica, 4000);

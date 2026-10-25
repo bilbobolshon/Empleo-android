@@ -13,10 +13,10 @@ Las versiones nuevas se instalan encima de la anterior sin perder tus datos.
 
 ## Fases
 
-1. ✅ Importar CV (PDF o foto), preguntas y creación de CV adaptados en PDF.
-2. ⏳ Leer Gmail y avisar de ofertas, respuestas y entrevistas.
-3. ⏳ Navegador con autorrelleno y paso a manual (inicios de sesión, captchas) + historial de candidaturas.
-4. ⏳ Búsqueda de ofertas y elección automática del CV más adecuado.
+1. ✅ Importar CV (PDF o foto), preguntas, «Qué busco» y creación de CV adaptados en PDF.
+2. ✅ Navegador con traspaso de control (accesos, captchas, Cl@ve, certificado), LABORA (ofertas y cursos),
+   empresas afines y añadidas a mano, valoración de ofertas, candidaturas con autorrelleno e historial.
+3. ⏳ Leer Gmail: ofertas, respuestas, teléfonos y entrevistas; revisión en segundo plano.
 
 ## Cómo está hecha (para quien la mantenga)
 

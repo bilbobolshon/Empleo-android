@@ -153,3 +153,13 @@ label.campo { display: block; font-weight: 600; margin: 14px 0 6px; }
 
 .pasos { padding-left: 22px; margin: 8px 0 12px; }
 .pasos li { margin-bottom: 6px; }
+
+.nota-oferta, .estado-c {
+  float: right; margin-left: 8px; padding: 3px 10px; border-radius: 20px;
+  font-size: 14px; font-weight: 700;
+}
+.estado-c { float: none; display: inline-block; margin: 0 0 6px; }
+.na, .ea { background: var(--ok-claro); color: var(--ok); }
+.nb, .eb { background: var(--primario-claro); color: var(--primario-oscuro); }
+.nc, .ec { background: var(--aviso-claro); color: var(--aviso); }
+.ex { background: #EEE; color: #777; }

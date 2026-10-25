@@ -1,15 +1,31 @@
 package es.fran.empleo;
 
+import android.Manifest;
 import android.app.Activity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.graphics.Color;
+import android.graphics.Typeface;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
 import android.print.PrintManager;
 import android.provider.MediaStore;
+import android.security.KeyChain;
+import android.util.TypedValue;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.webkit.ClientCertRequest;
+import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -18,47 +34,62 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.core.content.FileProvider;
 import androidx.webkit.WebViewAssetLoader;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.io.File;
+import java.security.PrivateKey;
+import java.security.cert.X509Certificate;
 
 /**
- * Pantalla principal: la interfaz de la app es una página web local (assets/www)
- * mostrada dentro de un WebView. Aquí solo va lo que necesita el sistema Android:
- * elegir archivos, hacer fotos, imprimir/guardar PDF y compartir.
+ * Pantalla principal.
+ * - "web": la interfaz de la app (página local en assets/www).
+ * - "portal": navegador interno para LABORA, portales de empleo y webs de empresas.
+ *   Funciona oculto mientras la app trabaja sola y se muestra, con una barra de
+ *   instrucciones arriba, cuando necesita que el usuario haga algo (acceso, captcha…).
  */
 public class MainActivity extends Activity {
 
     private static final String HOST = "appassets.androidplatform.net";
     private static final String INICIO = "https://" + HOST + "/assets/www/index.html";
+    private static final String CANAL = "avisos";
     private static final int REQ_ARCHIVO = 1;
     private static final int REQ_CAMARA = 2;
+    private static final int PRIMARIO = Color.rgb(0x1F, 0x5F, 0xAD);
 
     private WebView web;
-    private WebView vistaImpresion; // se guarda para que no se libere mientras imprime
+    private WebView portal;
+    private LinearLayout panel;
+    private TextView panelTexto;
+    private LinearLayout panelBotones;
+    private WebView vistaImpresion;
     private ValueCallback<Uri[]> esperaArchivos;
     private Uri fotoUri;
+    private int numAviso = 100;
 
     @Override
     protected void onCreate(Bundle estado) {
         super.onCreate(estado);
+
+        FrameLayout raiz = new FrameLayout(this);
         web = new WebView(this);
-        setContentView(web);
+        raiz.addView(web, new FrameLayout.LayoutParams(-1, -1));
+        construirPanel(raiz);
+        setContentView(raiz);
 
-        WebSettings s = web.getSettings();
-        s.setJavaScriptEnabled(true);
-        s.setDomStorageEnabled(true);
-        s.setAllowFileAccess(false);
-        s.setAllowContentAccess(true);
-        s.setMediaPlaybackRequiresUserGesture(true);
-
+        configurar(web);
         final WebViewAssetLoader cargador = new WebViewAssetLoader.Builder()
                 .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this))
                 .build();
-
         web.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) {
@@ -73,46 +104,198 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
-
-        web.setWebChromeClient(new WebChromeClient() {
-            @Override
-            public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
-                if (esperaArchivos != null) esperaArchivos.onReceiveValue(null);
-                esperaArchivos = cb;
-                try {
-                    if (p.isCaptureEnabled()) {
-                        File dir = new File(getCacheDir(), "fotos");
-                        dir.mkdirs();
-                        File f = new File(dir, "foto_" + System.currentTimeMillis() + ".jpg");
-                        fotoUri = FileProvider.getUriForFile(MainActivity.this,
-                                getPackageName() + ".fileprovider", f);
-                        Intent i = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-                        i.putExtra(MediaStore.EXTRA_OUTPUT, fotoUri);
-                        i.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                        startActivityForResult(i, REQ_CAMARA);
-                    } else {
-                        Intent i = new Intent(Intent.ACTION_GET_CONTENT);
-                        i.addCategory(Intent.CATEGORY_OPENABLE);
-                        i.setType("*/*");
-                        i.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/pdf", "image/*"});
-                        i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, p.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE);
-                        startActivityForResult(Intent.createChooser(i, "Elige tu CV"), REQ_ARCHIVO);
-                    }
-                } catch (Exception e) {
-                    esperaArchivos = null;
-                    cb.onReceiveValue(null);
-                    aviso("No se pudo abrir: " + e.getMessage());
-                }
-                return true;
-            }
-        });
-
+        web.setWebChromeClient(new Selector());
         web.addJavascriptInterface(new Puente(), "Android");
 
-        if (estado != null) {
-            web.restoreState(estado);
-        } else {
-            web.loadUrl(INICIO);
+        crearCanal();
+        pedirPermisoAvisos();
+
+        if (estado != null) web.restoreState(estado);
+        else web.loadUrl(INICIO);
+    }
+
+    // ---------- Navegador interno (portal) ----------
+
+    private void construirPanel(FrameLayout raiz) {
+        panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setBackgroundColor(Color.WHITE);
+        panel.setVisibility(View.INVISIBLE);
+
+        LinearLayout barra = new LinearLayout(this);
+        barra.setOrientation(LinearLayout.VERTICAL);
+        barra.setBackgroundColor(Color.rgb(0xFF, 0xF3, 0xDF));
+        int p = dp(12);
+        barra.setPadding(p, p, p, dp(6));
+
+        panelTexto = new TextView(this);
+        panelTexto.setTextColor(Color.rgb(0x1B, 0x24, 0x30));
+        panelTexto.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        panelTexto.setTypeface(Typeface.DEFAULT_BOLD);
+        barra.addView(panelTexto);
+
+        panelBotones = new LinearLayout(this);
+        panelBotones.setOrientation(LinearLayout.HORIZONTAL);
+        panelBotones.setPadding(0, dp(6), 0, 0);
+        barra.addView(panelBotones);
+
+        View linea = new View(this);
+        linea.setBackgroundColor(Color.rgb(0xC7, 0x77, 0x00));
+
+        portal = new WebView(this);
+        configurar(portal);
+        String ua = portal.getSettings().getUserAgentString();
+        portal.getSettings().setUserAgentString(ua.replace("; wv", ""));
+        portal.getSettings().setSupportMultipleWindows(false);
+        portal.getSettings().setLoadWithOverviewMode(true);
+        portal.getSettings().setUseWideViewPort(true);
+        portal.getSettings().setBuiltInZoomControls(true);
+        portal.getSettings().setDisplayZoomControls(false);
+        CookieManager.getInstance().setAcceptCookie(true);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(portal, true);
+
+        portal.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
+                String esquema = r.getUrl().getScheme();
+                if ("http".equals(esquema) || "https".equals(esquema)) return false;
+                abrirFuera(r.getUrl());
+                return true;
+            }
+
+            @Override
+            public void onPageStarted(WebView v, String url, android.graphics.Bitmap icono) {
+                avisarWeb("navEvento", "iniciada", url);
+            }
+
+            @Override
+            public void onPageFinished(WebView v, String url) {
+                CookieManager.getInstance().flush();
+                avisarWeb("navEvento", "cargada", url);
+            }
+
+            @Override
+            public void onReceivedClientCertRequest(WebView v, final ClientCertRequest req) {
+                // Certificado digital instalado en el móvil (para LABORA, Cl@ve, etc.)
+                KeyChain.choosePrivateKeyAlias(MainActivity.this, alias -> {
+                    if (alias == null) { req.cancel(); return; }
+                    new Thread(() -> {
+                        try {
+                            PrivateKey clave = KeyChain.getPrivateKey(MainActivity.this, alias);
+                            X509Certificate[] cadena = KeyChain.getCertificateChain(MainActivity.this, alias);
+                            if (clave != null && cadena != null) req.proceed(clave, cadena);
+                            else req.cancel();
+                        } catch (Exception e) {
+                            req.cancel();
+                        }
+                    }).start();
+                }, req.getKeyTypes(), req.getPrincipals(), req.getHost(), req.getPort(), null);
+            }
+        });
+        portal.setWebChromeClient(new Selector());
+
+        panel.addView(barra, new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT));
+        panel.addView(linea, new LinearLayout.LayoutParams(-1, dp(2)));
+        panel.addView(portal, new LinearLayout.LayoutParams(-1, 0, 1f));
+        raiz.addView(panel, new FrameLayout.LayoutParams(-1, -1));
+    }
+
+    private void mostrarPanel(String texto, String botonesJson) {
+        panelTexto.setText(texto);
+        panelBotones.removeAllViews();
+        try {
+            JSONArray lista = new JSONArray(botonesJson);
+            for (int i = 0; i < lista.length(); i++) {
+                JSONObject b = lista.getJSONObject(i);
+                final String id = b.optString("id");
+                boolean principal = b.optBoolean("principal", i == 0);
+                Button boton = new Button(this);
+                boton.setText(b.optString("texto"));
+                boton.setAllCaps(false);
+                boton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+                boton.setTextColor(principal ? Color.WHITE : PRIMARIO);
+                boton.setBackgroundColor(principal ? PRIMARIO : Color.WHITE);
+                boton.setOnClickListener(x -> avisarWeb("panelBoton", id, null));
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(48), 1f);
+                lp.setMargins(dp(3), dp(3), dp(3), dp(3));
+                panelBotones.addView(boton, lp);
+            }
+        } catch (Exception e) {
+            // sin botones
+        }
+        panel.setVisibility(View.VISIBLE);
+    }
+
+    private void ocultarPanel() {
+        panel.setVisibility(View.INVISIBLE);
+        hideKeyboard();
+    }
+
+    private void hideKeyboard() {
+        View v = getCurrentFocus();
+        if (v != null) {
+            android.view.inputmethod.InputMethodManager imm =
+                    (android.view.inputmethod.InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
+        }
+    }
+
+    /** Llama a una función de la interfaz: window.funcion(a, b) */
+    private void avisarWeb(String funcion, String a, String b) {
+        final String js = "window." + funcion + " && window." + funcion + "(" + JSONObject.quote(a) + ","
+                + (b == null ? "null" : JSONObject.quote(b)) + ")";
+        runOnUiThread(() -> web.evaluateJavascript(js, null));
+    }
+
+    // ---------- Comunes ----------
+
+    private void configurar(WebView v) {
+        WebSettings s = v.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setAllowFileAccess(false);
+        s.setAllowContentAccess(true);
+        s.setMediaPlaybackRequiresUserGesture(true);
+    }
+
+    private int dp(int valor) {
+        return Math.round(valor * getResources().getDisplayMetrics().density);
+    }
+
+    /** Selector de archivos y cámara, usado por las dos vistas web. */
+    private class Selector extends WebChromeClient {
+        @Override
+        public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
+            if (esperaArchivos != null) esperaArchivos.onReceiveValue(null);
+            esperaArchivos = cb;
+            try {
+                if (p.isCaptureEnabled()) {
+                    File dir = new File(getCacheDir(), "fotos");
+                    dir.mkdirs();
+                    File f = new File(dir, "foto_" + System.currentTimeMillis() + ".jpg");
+                    fotoUri = FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".fileprovider", f);
+                    Intent i = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+                    i.putExtra(MediaStore.EXTRA_OUTPUT, fotoUri);
+                    i.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    startActivityForResult(i, REQ_CAMARA);
+                } else {
+                    Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+                    i.addCategory(Intent.CATEGORY_OPENABLE);
+                    if (v == web) {
+                        i.setType("*/*");
+                        i.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/pdf", "image/*"});
+                    } else {
+                        i.setType("*/*");
+                    }
+                    i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, p.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE);
+                    startActivityForResult(Intent.createChooser(i, "Elige el archivo"), REQ_ARCHIVO);
+                }
+            } catch (Exception e) {
+                esperaArchivos = null;
+                cb.onReceiveValue(null);
+                aviso("No se pudo abrir: " + e.getMessage());
+            }
+            return true;
         }
     }
 
@@ -145,10 +328,28 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onPause() {
+        super.onPause();
+        CookieManager.getInstance().flush();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (web != null) avisarWeb("alVolver", "", null);
+    }
+
+    @Override
     @SuppressWarnings("deprecation")
     public void onBackPressed() {
-        if (web.canGoBack()) web.goBack();
-        else super.onBackPressed();
+        if (panel.getVisibility() == View.VISIBLE) {
+            if (portal.canGoBack()) portal.goBack();
+            else avisarWeb("panelBoton", "__atras", null);
+        } else if (web.canGoBack()) {
+            web.goBack();
+        } else {
+            super.onBackPressed();
+        }
     }
 
     private void abrirFuera(Uri u) {
@@ -163,7 +364,44 @@ public class MainActivity extends Activity {
         Toast.makeText(this, texto, Toast.LENGTH_LONG).show();
     }
 
-    /** Abre el diálogo de Android para guardar el CV como PDF (o imprimirlo). */
+    // ---------- Avisos (notificaciones) ----------
+
+    private void crearCanal() {
+        if (Build.VERSION.SDK_INT >= 26) {
+            NotificationChannel c = new NotificationChannel(CANAL, "Avisos de empleo", NotificationManager.IMPORTANCE_HIGH);
+            c.setDescription("Ofertas nuevas, accesos pendientes y respuestas de empresas");
+            getSystemService(NotificationManager.class).createNotificationChannel(c);
+        }
+    }
+
+    private void pedirPermisoAvisos() {
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 9);
+        }
+    }
+
+    private void notificar(String titulo, String texto) {
+        Intent abrir = new Intent(this, MainActivity.class);
+        abrir.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        PendingIntent pi = PendingIntent.getActivity(this, 0, abrir, PendingIntent.FLAG_IMMUTABLE);
+        Notification n = new Notification.Builder(this, CANAL)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle(titulo)
+                .setContentText(texto)
+                .setStyle(new Notification.BigTextStyle().bigText(texto))
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .build();
+        try {
+            getSystemService(NotificationManager.class).notify(numAviso++, n);
+        } catch (SecurityException e) {
+            // sin permiso de avisos
+        }
+    }
+
+    // ---------- Impresión / PDF ----------
+
     private void imprimir(String html, String nombre) {
         final WebView v = new WebView(this);
         vistaImpresion = v;
@@ -185,7 +423,8 @@ public class MainActivity extends Activity {
         v.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
     }
 
-    /** Funciones que la página puede llamar con window.Android.xxx() */
+    // ---------- Funciones que la interfaz puede llamar: window.Android.xxx() ----------
+
     private class Puente {
         @JavascriptInterface
         public void guardarPdf(final String html, final String nombre) {
@@ -213,8 +452,52 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void notificar(final String titulo, final String texto) {
+            runOnUiThread(() -> MainActivity.this.notificar(titulo, texto));
+        }
+
+        @JavascriptInterface
         public String version() {
             return BuildConfig.VERSION_NAME;
+        }
+
+        // --- navegador interno ---
+
+        @JavascriptInterface
+        public void navAbrir(final String url) {
+            runOnUiThread(() -> portal.loadUrl(url));
+        }
+
+        @JavascriptInterface
+        public void navEjecutar(final String id, final String js) {
+            runOnUiThread(() -> portal.evaluateJavascript(js, resultado -> {
+                String r = resultado == null ? "null" : resultado;
+                web.evaluateJavascript("window.navResultado && window.navResultado(" + JSONObject.quote(id) + "," + r + ")", null);
+            }));
+        }
+
+        @JavascriptInterface
+        public void navMostrar(final String texto, final String botonesJson) {
+            runOnUiThread(() -> mostrarPanel(texto, botonesJson));
+        }
+
+        @JavascriptInterface
+        public void navOcultar() {
+            runOnUiThread(MainActivity.this::ocultarPanel);
+        }
+
+        @JavascriptInterface
+        public void navParar() {
+            runOnUiThread(() -> portal.stopLoading());
+        }
+
+        @JavascriptInterface
+        public void navOlvidarSesiones() {
+            runOnUiThread(() -> {
+                CookieManager.getInstance().removeAllCookies(null);
+                CookieManager.getInstance().flush();
+                portal.clearCache(true);
+            });
         }
     }
 }
