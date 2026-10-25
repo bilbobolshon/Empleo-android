@@ -14,6 +14,7 @@ function enviosHoy() {
 }
 
 function nombrePdf(cv) {
+  if (cv.original && cv.nombreArchivo) return cv.nombreArchivo;
   const n = (cv.contenido.contacto && cv.contenido.contacto.nombre) || 'CV';
   return ('CV ' + n + ' - ' + cv.titulo).replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 80) + '.pdf';
 }
@@ -47,7 +48,7 @@ function textoCorreoCandidatura(c, cv) {
 async function enviarPorCorreo(c, email, cv) {
   if (!(E.correo && E.correo.conectado) || !(window.Android && window.Android.correoConAdjunto)) return false;
   const asunto = (c.tipo === 'espontanea' ? 'Candidatura espontánea' : 'Candidatura: ' + c.titulo) + ' — ' + ((cv.contenido.contacto || {}).nombre || '');
-  const pdf = cvPdfBase64(cv.contenido);
+  const pdf = pdfDeCv(cv);
   const r = await new Promise((ok) => {
     const id = 'adj' + Date.now();
     const anterior = window.correoResultado;
@@ -127,7 +128,7 @@ async function enviarEnWeb(c, o, cv) {
   let a = await Nav.analizar();
   if (a.obstaculo) { pausar(c, motivoAcceso(a.obstaculo, c)); return 'acceso'; }
   hist(c, 'La app abrió la web de la oferta');
-  const pdf = cvPdfBase64(cv.contenido);
+  const pdf = pdfDeCv(cv);
   for (let paso = 0; paso < 6; paso++) {
     let campos = (await Nav.ejecutarJson(JS_FORMULARIO)) || [];
     if (!campos.filter((f) => f.tipo !== 'file').length) {

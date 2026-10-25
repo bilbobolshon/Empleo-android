@@ -428,8 +428,10 @@ function pSubir() {
     '<input class="archivo-oculto" type="file" id="camara" accept="image/*" capture="environment">' +
     (pendientes.length ? '<ul class="lista-archivos">' + lista + '</ul>' : '<p class="suave centro">Todavía no has elegido ningún archivo.</p>') +
     '<p class="suave">Consejo para las fotos: buena luz, el papel entero en la imagen y sin sombras.</p>' +
-    '<button class="boton" id="analizar"' + (pendientes.length ? '' : ' disabled') + '>Analizar ' +
-    (pendientes.length > 1 ? 'mis ' + pendientes.length + ' CV' : 'mi CV') + '</button>');
+    '<p class="pregunta" style="font-size:18px">¿Qué quieres hacer con ' + (pendientes.length > 1 ? 'ellos' : 'él') + '?</p>' +
+    '<button class="boton" id="analizar"' + (pendientes.length ? '' : ' disabled') + '>✨ Mejorarlos: hazme preguntas y crea CV nuevos</button>' +
+    '<button class="boton secundario" data-accion="analizar-tal-cual"' + (pendientes.length ? '' : ' disabled') + '>📎 Usarlos tal cual, sin crear CV nuevos</button>' +
+    '<p class="suave">En los dos casos guardo tus CV originales y puedes usarlos para presentarte.</p>');
 
   const anadir = (ev) => {
     const malos = [];
@@ -446,20 +448,26 @@ function pSubir() {
   document.querySelectorAll('[data-quitar]').forEach((b) => {
     b.onclick = () => { pendientes.splice(Number(b.dataset.quitar), 1); pSubir(); };
   });
-  $('#analizar').onclick = analizar;
+  $('#analizar').onclick = () => analizar('mejorar');
 }
 
-async function analizar() {
+async function analizar(modo) {
   if (!iaLista()) { fallo(new Error('SIN_CLAVE')); return; }
+  if (!pendientes.length) return;
   cargando('Leyendo tus CV…\nPuede tardar hasta un minuto.');
   try {
     const bloques = [];
+    const originales = [];
     for (const p of pendientes) {
       if (p.tipo === 'pdf') {
         if (p.file.size > 25 * 1024 * 1024) throw new Error('El PDF "' + p.nombre + '" es demasiado grande (más de 25 MB).');
-        bloques.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: await leerBase64(p.file) } });
+        const datos = await leerBase64(p.file);
+        bloques.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: datos } });
+        originales.push({ nombre: p.nombre, b64: datos });
       } else {
-        bloques.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: await fotoReducida(p.file) } });
+        const datos = await fotoReducida(p.file);
+        bloques.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: datos } });
+        originales.push({ nombre: (p.nombre || 'CV').replace(/\.\w+$/, '') + '.pdf', b64: await fotoAPdf(datos) });
       }
     }
     bloques.push({ type: 'text', text: promptAnalisis(E.perfil) });
@@ -469,10 +477,20 @@ async function analizar() {
     E.preguntas = (r.preguntas || []).filter((p) => p && p.texto).slice(0, 15)
       .map((p, i) => Object.assign({ id: 'p' + (i + 1), tipo: 'texto', opciones: [] }, p, { id: 'p' + (i + 1) }));
     E.respuestas = {};
+    E.fuentes = E.fuentes.concat(pendientes.map((p) => p.nombre));
+    anadirOriginales(originales);
+    pendientes = [];
+    if (modo === 'tal-cual') {
+      E.preferencias = E.preferencias || {};
+      guardar();
+      quitarCarga();
+      mensaje('He leído y guardado tus CV tal cual' + (E.perfil.nombre ? ', ' + E.perfil.nombre.split(' ')[0] : '') + '.\n\n' +
+        'Los usaré para presentarte sin cambiarlos. Ahora dime qué puestos buscas (te propongo algunos según tus CV).',
+        [{ texto: 'Elegir qué busco', accion: () => ir('busqueda') }, { texto: 'Ver mis CV', accion: () => ir('miscv') }]);
+      return;
+    }
     E.preferencias = null;
     E.orientaciones = [];
-    E.fuentes = E.fuentes.concat(pendientes.map((p) => p.nombre));
-    pendientes = [];
     guardar();
     quitarCarga();
     if (E.preguntas.length) {
@@ -689,10 +707,11 @@ async function crearCvs(orientaciones) {
 
 function pMisCv() {
   const lista = E.cvs.map((c) =>
-    '<div class="tarjeta"><h3>📄 ' + esc(c.titulo) + '</h3>' +
-    '<p class="suave">' + esc(c.contenido.titulo_profesional || '') + ' · ' + fecha(c.fecha) + '</p>' +
-    '<div class="fila"><button class="boton" data-ir="cv/' + c.id + '">Ver</button>' +
-    '<button class="boton secundario" data-ir="editar/' + c.id + '">Editar</button>' +
+    '<div class="tarjeta"><h3>' + (c.original ? '📎 ' : '📄 ') + esc(c.titulo) + '</h3>' +
+    '<p class="suave">' + (c.original ? 'CV original, tal cual lo subiste' : esc(c.contenido.titulo_profesional || '')) + ' · ' + fecha(c.fecha) + '</p>' +
+    '<div class="fila">' + (c.original
+      ? '<button class="boton" data-accion="abrir-original:' + c.id + '">Abrir</button>'
+      : '<button class="boton" data-ir="cv/' + c.id + '">Ver</button><button class="boton secundario" data-ir="editar/' + c.id + '">Editar</button>') +
     '<button class="boton peligro" data-accion="borrar-cv:' + c.id + '">Borrar</button></div></div>').join('');
 
   pantalla('Mis CV',
@@ -706,6 +725,7 @@ function pMisCv() {
 function pCv(id) {
   const c = E.cvs.find((x) => x.id === id);
   if (!c) { ir('miscv'); return; }
+  if (c.original) { pCvOriginal(c); return; }
   const html = htmlCv(c.contenido);
 
   pantalla(c.titulo,

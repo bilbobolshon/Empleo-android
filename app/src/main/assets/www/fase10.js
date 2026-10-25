@@ -32,6 +32,7 @@ function borrarCv(id) {
   const c = E.cvs.find((x) => x.id === id);
   if (!c) return;
   preguntar('¿Borrar el CV «' + c.titulo + '»? No se puede deshacer.', 'Sí, borrar', () => {
+    borrarArchivoCv(c);
     E.cvs = E.cvs.filter((x) => x.id !== id);
     guardar();
     ir('miscv');
@@ -43,6 +44,7 @@ function borrarCv(id) {
 function pEditarCv(id) {
   const cv = E.cvs.find((x) => x.id === id);
   if (!cv) { ir('miscv'); return; }
+  if (cv.original) { pCvOriginal(cv); return; }
   const c = cv.contenido;
   const k = c.contacto || {};
   const campo = (etq, nombre, valor, area) => '<label class="campo">' + etq + '</label>' +

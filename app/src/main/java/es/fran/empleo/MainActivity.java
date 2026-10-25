@@ -659,6 +659,64 @@ public class MainActivity extends Activity {
             }).start();
         }
 
+        // --- CV originales guardados en el móvil ---
+
+        private File archivoCv(String nombre) {
+            File d = new File(getFilesDir(), "cvs");
+            d.mkdirs();
+            return new File(d, nombre.replaceAll("[^A-Za-z0-9_.-]", "_"));
+        }
+
+        @JavascriptInterface
+        public boolean guardarArchivo(String nombre, String b64) {
+            try (java.io.FileOutputStream o = new java.io.FileOutputStream(archivoCv(nombre))) {
+                o.write(android.util.Base64.decode(b64, android.util.Base64.DEFAULT));
+                return true;
+            } catch (Exception e) {
+                return false;
+            }
+        }
+
+        @JavascriptInterface
+        public String leerArchivo(String nombre) {
+            try {
+                File f = archivoCv(nombre);
+                byte[] datos = new byte[(int) f.length()];
+                try (java.io.FileInputStream i = new java.io.FileInputStream(f)) {
+                    int leidos = 0;
+                    while (leidos < datos.length) {
+                        int n = i.read(datos, leidos, datos.length - leidos);
+                        if (n < 0) break;
+                        leidos += n;
+                    }
+                }
+                return android.util.Base64.encodeToString(datos, android.util.Base64.NO_WRAP);
+            } catch (Exception e) {
+                return "";
+            }
+        }
+
+        @JavascriptInterface
+        public void borrarArchivo(String nombre) {
+            //noinspection ResultOfMethodCallIgnored
+            archivoCv(nombre).delete();
+        }
+
+        @JavascriptInterface
+        public void abrirArchivo(final String nombre) {
+            runOnUiThread(() -> {
+                try {
+                    Uri u = FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".fileprovider", archivoCv(nombre));
+                    Intent i = new Intent(Intent.ACTION_VIEW);
+                    i.setDataAndType(u, "application/pdf");
+                    i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    startActivity(Intent.createChooser(i, "Abrir CV"));
+                } catch (Exception e) {
+                    MainActivity.this.aviso("No hay ninguna app para abrir PDF");
+                }
+            });
+        }
+
         @JavascriptInterface
         public void programarAviso(String id, double cuando, String titulo, String texto) {
             TrabajoAviso.programar(getApplicationContext(), id, (long) cuando, titulo, texto);
