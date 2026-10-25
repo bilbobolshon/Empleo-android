@@ -10,13 +10,18 @@
   <header id="barra">
     <button id="atras" aria-label="Atrás" hidden>&#8592;</button>
     <h1 id="titulo">Mi Empleo</h1>
+    <button id="adelante" aria-label="Adelante" hidden>&#8594;</button>
   </header>
+  <div id="trabajo" hidden><span class="rueda-mini"></span><span class="trabajo-texto">Trabajando…</span><span class="trabajo-tiempo">0:00</span></div>
   <main id="pantalla"></main>
 
   <div id="carga" hidden>
     <div class="carga-caja">
       <div class="rueda"></div>
       <p id="carga-texto">Un momento…</p>
+      <div class="progreso" id="carga-progreso" hidden><div id="carga-barra"></div></div>
+      <p id="carga-tiempo" class="suave"></p>
+      <p class="suave">Estoy trabajando: espera un momento, no hace falta que toques nada.</p>
     </div>
   </div>
 
@@ -39,6 +44,7 @@
   <script src="fase7.js"></script>
   <script src="fase8.js"></script>
   <script src="fase9.js"></script>
+  <script src="fase10.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -230,7 +230,8 @@ async function enviarListas(deUsuario) {
       const o = E.ofertas.find((x) => x.id === c.oferta) || {};
       const cv = E.cvs.find((x) => x.id === c.cv) || mejorCv(c.titulo + ' ' + (c.empresa || ''));
       if (!cv) break;
-      if (deUsuario) cargando('Enviando candidaturas (' + (k + 1) + ' de ' + lista.length + '):\n' + (c.empresa || c.titulo));
+      if (deUsuario) cargando('Enviando candidaturas:\n' + (c.empresa || c.titulo), k + 1, lista.length);
+      else Trabajo.mostrar('Enviando tu CV a ' + (c.empresa || c.titulo), k + 1, lista.length);
       let ok = false;
       const email = o.email || (E.sitios.find((s) => s.id === o.sitio) || {}).email;
       if (email && E.correo && E.correo.conectado) ok = await enviarPorCorreo(c, email, cv);
@@ -245,6 +246,7 @@ async function enviarListas(deUsuario) {
     }
   } finally {
     enviando = false;
+    if (!deUsuario) Trabajo.ocultar();
     Nav.ocultar();
   }
   if (pendientes) {

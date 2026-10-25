@@ -197,7 +197,8 @@ async function revisarTodo(deUsuario) {
     await Nav.cola(async () => {
       for (let k = 0; k < sitios.length; k++) {
         const s = sitios[k];
-        if (deUsuario) cargando('Revisando ' + (k + 1) + ' de ' + sitios.length + ':\n' + s.nombre);
+        if (deUsuario) cargando('Revisando ' + (k + 1) + ' de ' + sitios.length + ':\n' + s.nombre, k + 1, sitios.length);
+        else Trabajo.mostrar('Buscando ofertas: ' + s.nombre, k + 1, sitios.length);
         const r = await revisarSitio(s);
         nuevas = nuevas.concat(r.nuevas);
         cambiosCursos = cambiosCursos.concat(r.cursos);
@@ -216,6 +217,7 @@ async function revisarTodo(deUsuario) {
     guardar();
   } catch (err) {
     revisando = false;
+    Trabajo.ocultar();
     Nav.ocultar();
     if (deUsuario) fallo(err);
     refrescarSiInicio();
@@ -223,6 +225,7 @@ async function revisarTodo(deUsuario) {
   }
   revisando = false;
   quitarCarga();
+  Trabajo.ocultar();
   const buenas = nuevas.filter((o) => (o.nota || 0) >= umbral());
   if (buenas.length) {
     avisar(buenas.length === 1 ? 'Nueva oferta para ti' : buenas.length + ' ofertas nuevas para ti',
@@ -527,7 +530,7 @@ async function proponerEmpresas() {
         let url = e.url_empleo;
         // Con la IA gratuita las direcciones pueden estar inventadas: se buscan con un buscador normal
         if (!url || proveedorIA() === 'gemini') {
-          cargando('Buscando la web de empleo de ' + e.nombre + ' (' + (k + 1) + ' de ' + marcadas.length + ')…');
+          cargando('Buscando la web de empleo de ' + e.nombre + '…', k + 1, marcadas.length);
           url = (await buscarWebEmpleo(e.nombre)) || url;
         }
         if (!url) { sinWeb.push(e.nombre); continue; }

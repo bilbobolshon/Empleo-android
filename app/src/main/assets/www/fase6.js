@@ -102,7 +102,8 @@ async function resolverWebsPendientes(maximo, deUsuario) {
   const pendientes = E.sitios.filter((s) => s.pendienteWeb).slice(0, maximo);
   for (let k = 0; k < pendientes.length; k++) {
     const s = pendientes[k];
-    if (deUsuario) cargando('Buscando la web de empleo de ' + s.nombre + ' (' + (k + 1) + ' de ' + pendientes.length + ')…');
+    if (deUsuario) cargando('Buscando la web de empleo de ' + s.nombre + '…', k + 1, pendientes.length);
+    else Trabajo.mostrar('Buscando webs de empleo: ' + s.nombre, k + 1, pendientes.length);
     const url = await buscarWebEmpleo(s.nombre + ' ' + (ciudad() || 'España'));
     s.pendienteWeb = false;
     if (url) s.paginas = [{ tipo: 'ofertas', url }];

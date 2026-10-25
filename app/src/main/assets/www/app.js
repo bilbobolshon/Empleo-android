@@ -79,11 +79,23 @@ function pantalla(titulo, html, conAtras = true) {
   window.scrollTo(0, 0);
 }
 
-function cargando(texto) {
+let cargaInicio = 0, cargaReloj = null;
+// Pantalla de espera: texto, progreso (actual de total) y tiempo que lleva trabajando
+function cargando(texto, actual, total) {
   $('#carga-texto').textContent = texto || 'Un momento…';
+  const barra = $('#carga-progreso');
+  if (total) { barra.hidden = false; $('#carga-barra').style.width = Math.round((actual / total) * 100) + '%'; }
+  else barra.hidden = true;
+  if ($('#carga').hidden) {
+    cargaInicio = Date.now();
+    clearInterval(cargaReloj);
+    const reloj = () => { $('#carga-tiempo').textContent = 'Tiempo: ' + duracion(Date.now() - cargaInicio); };
+    reloj();
+    cargaReloj = setInterval(reloj, 1000);
+  }
   $('#carga').hidden = false;
 }
-function quitarCarga() { $('#carga').hidden = true; }
+function quitarCarga() { $('#carga').hidden = true; clearInterval(cargaReloj); }
 
 function mensaje(texto, botones) {
   botones = botones || [{ texto: 'Entendido' }];
@@ -499,6 +511,10 @@ function pPreguntas(arg) {
     '<div class="fila">' +
       (i > 0 ? '<button class="boton secundario" id="anterior">Anterior</button>' : '') +
       '<button class="boton texto" id="saltar">Saltar esta pregunta</button>' +
+    '</div>' +
+    '<div class="fila" style="margin-top:18px">' +
+      '<button class="boton texto" data-accion="reiniciar-preguntas">↺ Empezar de nuevo</button>' +
+      '<button class="boton texto" data-accion="preguntas-nuevas">Preguntas nuevas</button>' +
     '</div>');
 
   const recoger = () => {
@@ -551,7 +567,10 @@ const SECTORES = [
 // Todo lo que no se ha desmarcado cuenta como marcado (por defecto se busca en todo)
 function busquedaActual() {
   const b = E.busqueda || { quitados: [], extra: [] };
-  const puestos = Array.from(new Set(lleno((E.preferencias && E.preferencias.puestos) || []).concat(b.extra || [])));
+  const puestos = Array.from(new Set(lleno((E.preferencias && E.preferencias.puestos) || [])
+    .concat(lleno(E.sugeridos))
+    .concat([].concat(...lleno(E.orientaciones).map((o) => lleno(o.puestos_ejemplo))))
+    .concat(b.extra || [])));
   return { b, puestos };
 }
 
@@ -560,13 +579,20 @@ function pBusqueda(arg) {
   const quitados = new Set(b.quitados || []);
   const ficha = (x) => '<button class="opcion marca' + (quitados.has(x) ? '' : ' marcada') + '" data-m="' + esc(x) + '">' + esc(x) + '</button>';
   const seguir = arg === 'seguir';
+  if (!puestos.length && E.perfil && iaLista() && !pBusqueda.intentado) {
+    pBusqueda.intentado = true;
+    sugerirPuestos(true).then((ok) => { if (ok) pBusqueda(arg); });
+  }
 
   pantalla('Qué busco',
     '<h2>¿Dónde quieres que busque?</h2>' +
     '<p class="suave">Por defecto busco en <b>todo</b>. Desmarca lo que no te interese para afinar el tiro. Puedes cambiarlo cuando quieras desde el inicio.</p>' +
     '<div class="fila"><button class="boton secundario" id="todo">Marcar todo</button>' +
     '<button class="boton secundario" id="nada">Desmarcar todo</button></div>' +
-    (puestos.length ? '<h3>Tipos de puesto</h3><div class="marcas">' + puestos.map(ficha).join('') + '</div>' : '') +
+    '<h3>Tipos de puesto</h3>' +
+    (puestos.length ? '<p class="suave">Te los propongo a partir de tus CV. Desmarca los que no quieras.</p><div class="marcas">' + puestos.map(ficha).join('') + '</div>'
+      : '<p class="suave">Aún no tengo puestos para proponerte.</p>') +
+    '<button class="boton secundario" data-accion="sugerir-puestos">✨ ' + (puestos.length ? 'Sugerirme más puestos' : 'Sugerirme puestos según mi CV') + '</button>' +
     '<h3>Sectores</h3><div class="marcas">' + SECTORES.map(ficha).join('') + '</div>' +
     '<label class="campo" for="nuevo">Añadir un puesto o sector</label>' +
     '<div class="fila"><input type="text" id="nuevo" placeholder="Por ejemplo: guía turístico">' +
@@ -640,7 +666,7 @@ async function crearCvs(orientaciones) {
   try {
     for (let i = 0; i < orientaciones.length; i++) {
       const o = orientaciones[i];
-      cargando('Creando CV ' + (i + 1) + ' de ' + orientaciones.length + ':\n' + o.titulo);
+      cargando('Creando CV:\n' + o.titulo, i + 1, orientaciones.length);
       const contenido = await iaJson([{ type: 'text', text: promptCv(E.perfil, E.preferencias, o) }], 8000);
       contenido.contacto = {
         nombre: E.perfil.nombre || '', telefono: E.perfil.telefono || '',
@@ -663,12 +689,16 @@ async function crearCvs(orientaciones) {
 
 function pMisCv() {
   const lista = E.cvs.map((c) =>
-    '<div class="tarjeta pulsable" data-ir="cv/' + c.id + '"><h3>📄 ' + esc(c.titulo) + '</h3>' +
-    '<p class="suave">' + esc(c.contenido.titulo_profesional || '') + ' · creado el ' + fecha(c.fecha) + '</p></div>').join('');
+    '<div class="tarjeta"><h3>📄 ' + esc(c.titulo) + '</h3>' +
+    '<p class="suave">' + esc(c.contenido.titulo_profesional || '') + ' · ' + fecha(c.fecha) + '</p>' +
+    '<div class="fila"><button class="boton" data-ir="cv/' + c.id + '">Ver</button>' +
+    '<button class="boton secundario" data-ir="editar/' + c.id + '">Editar</button>' +
+    '<button class="boton peligro" data-accion="borrar-cv:' + c.id + '">Borrar</button></div></div>').join('');
 
   pantalla('Mis CV',
     (lista || '<div class="tarjeta"><h3>Aún no tienes CV creados</h3><p class="suave">Sube tu CV actual y te ayudo a crear versiones mejores.</p></div>') +
     (E.preferencias ? '<button class="boton" data-ir="orientaciones">Crear otro CV</button>' : '<button class="boton" data-ir="subir">Subir mi CV</button>') +
+    (E.preguntas.length ? '<button class="boton secundario" data-accion="reiniciar-preguntas">↺ Repetir el cuestionario</button>' : '') +
     htmlFotoYDiseno());
   activarFotoYDiseno(pMisCv);
 }
@@ -682,6 +712,7 @@ function pCv(id) {
     '<p class="suave">Así queda tu CV. Toca "Guardar en PDF" y elige <b>Guardar como PDF</b> en la pantalla que aparece.</p>' +
     '<div class="vista-cv" id="marco"><iframe id="cv-frame" title="Vista del CV"></iframe></div>' +
     '<button class="boton" id="pdf">⬇️  Guardar en PDF</button>' +
+    '<button class="boton secundario" data-ir="editar/' + c.id + '">✏️  Editar a mano</button>' +
     htmlFotoYDiseno() +
     '<label class="campo" for="cambios">¿Quieres cambiar algo?</label>' +
     '<textarea id="cambios" placeholder="Por ejemplo: quita la experiencia de 2009, pon el teléfono 600 000 000, haz el resumen más corto…"></textarea>' +
@@ -743,6 +774,7 @@ const RUTAS = {
   busqueda: pBusqueda,
   miscv: pMisCv,
   cv: pCv,
+  editar: pEditarCv,
   ofertas: pOfertas,
   candidaturas: pCandidaturas,
   candidatura: pCandidatura,
