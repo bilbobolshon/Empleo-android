@@ -22,6 +22,10 @@ import javax.mail.Store;
 import javax.mail.Transport;
 import javax.mail.UIDFolder;
 import javax.mail.internet.InternetAddress;
+import javax.mail.internet.MimeBodyPart;
+import javax.mail.internet.MimeMultipart;
+import javax.mail.util.ByteArrayDataSource;
+import javax.activation.DataHandler;
 import javax.mail.internet.MimeMessage;
 import javax.mail.search.ComparisonTerm;
 import javax.mail.search.ReceivedDateTerm;
@@ -52,6 +56,11 @@ final class Correo {
     }
 
     static void enviar(JSONObject c, String para, String asunto, String cuerpo) throws Exception {
+        enviar(c, para, asunto, cuerpo, null, null);
+    }
+
+    /** Envía un correo; si se indica, con un PDF adjunto (en base64). */
+    static void enviar(JSONObject c, String para, String asunto, String cuerpo, String adjuntoB64, String nombreAdjunto) throws Exception {
         final String usuario = c.getString("usuario");
         final String clave = c.getString("clave").replace(" ", "");
         String smtp = c.optString("smtp", "smtp.gmail.com");
@@ -73,7 +82,20 @@ final class Correo {
         m.setFrom(new InternetAddress(usuario, "Mi Empleo", "UTF-8"));
         m.setRecipients(Message.RecipientType.TO, InternetAddress.parse(para));
         m.setSubject(asunto, "UTF-8");
-        m.setText(cuerpo, "UTF-8");
+        if (adjuntoB64 == null || adjuntoB64.isEmpty()) {
+            m.setText(cuerpo, "UTF-8");
+        } else {
+            MimeBodyPart texto = new MimeBodyPart();
+            texto.setText(cuerpo, "UTF-8");
+            MimeBodyPart adjunto = new MimeBodyPart();
+            byte[] datos = android.util.Base64.decode(adjuntoB64, android.util.Base64.DEFAULT);
+            adjunto.setDataHandler(new DataHandler(new ByteArrayDataSource(datos, "application/pdf")));
+            adjunto.setFileName(javax.mail.internet.MimeUtility.encodeText(nombreAdjunto, "UTF-8", null));
+            MimeMultipart partes = new MimeMultipart();
+            partes.addBodyPart(texto);
+            partes.addBodyPart(adjunto);
+            m.setContent(partes);
+        }
         Transport.send(m);
     }
 

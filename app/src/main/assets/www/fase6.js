@@ -146,7 +146,7 @@ function prepararCandidaturas(ofertas) {
   });
   if (listas.length) {
     guardar();
-    notificarUsuario(listas.length === 1 ? 'Candidatura lista para enviar' : listas.length + ' candidaturas listas para enviar',
+    if (!envioDirecto()) notificarUsuario(listas.length === 1 ? 'Candidatura lista para enviar' : listas.length + ' candidaturas listas para enviar',
       listas.slice(0, 3).map((c) => c.titulo + (c.empresa ? ' — ' + c.empresa : '')).join('\n') + '\nAbre la app y pulsa «Presentarme a todas».');
   }
   return listas;

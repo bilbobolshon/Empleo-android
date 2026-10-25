@@ -85,6 +85,13 @@ const Nav = (() => {
     botonSuelto = null;
   }
 
+  // Espera a que termine de cargar una página nueva (tras pulsar un botón o enlace)
+  async function esperarCarga(espera) {
+    const r = await new Promise((ok) => { esperasCarga.push(ok); setTimeout(() => ok(null), espera || 12000); });
+    await dormir(2000);
+    return r;
+  }
+
   async function analizar() {
     return (await ejecutarJson(JS_ANALIZAR)) || { url: ultimaUrl, titulo: '', texto: '', obstaculo: null, enlaces: [], campos: 0 };
   }
@@ -98,7 +105,7 @@ const Nav = (() => {
   }
 
   return {
-    disponible, abrir, ejecutar, ejecutarJson, panel, esperarBoton, tomarBotonSuelto, ocultar, analizar, cola,
+    disponible, abrir, ejecutar, ejecutarJson, panel, esperarBoton, tomarBotonSuelto, ocultar, analizar, cola, esperarCarga,
     get ocupado() { return ocupado > 0; },
     get url() { return ultimaUrl; }
   };

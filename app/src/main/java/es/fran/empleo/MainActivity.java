@@ -637,6 +637,29 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void correoConAdjunto(final String id, final String cfg, final String para, final String asunto,
+                                     final String cuerpo, final String adjuntoB64, final String nombre) {
+            new Thread(() -> {
+                String error = null;
+                try {
+                    Correo.enviar(new JSONObject(cfg), para, asunto, cuerpo, adjuntoB64, nombre);
+                } catch (Throwable e) {
+                    error = e.getClass().getSimpleName() + ": " + e.getMessage();
+                }
+                String res;
+                try {
+                    JSONObject r = new JSONObject();
+                    r.put("ok", error == null);
+                    if (error != null) r.put("error", error);
+                    res = r.toString();
+                } catch (Exception e) {
+                    res = "{\"ok\":false}";
+                }
+                avisarWeb("correoResultado", id, res);
+            }).start();
+        }
+
+        @JavascriptInterface
         public void programarAviso(String id, double cuando, String titulo, String texto) {
             TrabajoAviso.programar(getApplicationContext(), id, (long) cuando, titulo, texto);
         }

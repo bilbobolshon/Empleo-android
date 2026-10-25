@@ -95,11 +95,15 @@ function promptExtraer(s, pg, a) {
       ? '- Extrae los cursos que aparecen como del usuario (seleccionado, preinscrito, admitido, en curso, finalizado…), con su estado tal como lo muestra la web.'
       : '- Extrae las ofertas de empleo que aparecen. "url" es el enlace de la oferta, tomado de la lista de enlaces; si no tiene enlace propio, usa la dirección de la página.',
     '- No incluyas menús, noticias ni avisos que no sean ' + (cursos ? 'cursos.' : 'ofertas.'),
+    cursos ? '' : '- Si una oferta dice que se envíe el CV a un correo, ponlo en su "email".',
+    cursos ? '' : '- "email_empleo": correo de RRHH, selección o empleo que aparezca en la página (si no hay, "").',
+    cursos ? '' : '- "enlace_ofertas": si esta página no muestra las ofertas pero tiene un enlace para verlas o buscarlas (por ejemplo «Ver ofertas», «Buscar empleo», «Vacantes», «Oportunidades»), su dirección; si no, "".',
+    cursos ? '' : '- "enlace_espontanea": dirección para enviar una candidatura espontánea o dejar el CV en su bolsa de empleo («Envía tu CV», «Autocandidatura», «Registro de candidatos»…); si no hay, "".',
     '',
     'Devuelve este JSON:',
     cursos
       ? '{"requiere_acceso":false,"cursos":[{"titulo":"","estado":"","fechas":"","lugar":"","resumen":"","url":""}]}'
-      : '{"requiere_acceso":false,"ofertas":[{"titulo":"","empresa":"","lugar":"","resumen":"","fecha":"","url":""}]}'
+      : '{"requiere_acceso":false,"email_empleo":"","enlace_ofertas":"","enlace_espontanea":"","ofertas":[{"titulo":"","empresa":"","lugar":"","resumen":"","fecha":"","url":"","email":""}]}'
   ].join('\n');
 }
 
@@ -184,7 +188,7 @@ async function revisarTodo(deUsuario) {
   }
   revisando = true;
   refrescarSiInicio();
-  let nuevas = [], cambiosCursos = [], listas = [];
+  let nuevas = [], cambiosCursos = [], listas = [], envio = { enviadas: 0, pendientes: 0 };
   const accesos = [];
   try {
     await prepararEmpresas(deUsuario);
@@ -206,6 +210,8 @@ async function revisarTodo(deUsuario) {
       await valorar(nuevas);
       listas = prepararCandidaturas(nuevas);
     }
+    listas = listas.concat(prepararEspontaneas());
+    if (envioDirecto() && E.candidaturas.some((c) => c.estado === 'lista')) envio = await enviarListas(deUsuario);
     E.ultimaRevision = Date.now();
     guardar();
   } catch (err) {
@@ -227,7 +233,9 @@ async function revisarTodo(deUsuario) {
   if (deUsuario) {
     mensaje('Revisión terminada.\n\n' +
       '• Ofertas nuevas: ' + nuevas.length + (nuevas.length ? ' (' + buenas.length + ' encajan contigo)' : '') + '\n' +
-      (listas.length ? '• Candidaturas preparadas para enviar: ' + listas.length + '\n' : '') +
+      (envio.enviadas ? '• CV enviados por la app: ' + envio.enviadas + '\n' : '') +
+      (envio.pendientes ? '• Candidaturas que necesitan algo de ti: ' + envio.pendientes + '\n' : '') +
+      (!envioDirecto() && listas.length ? '• Candidaturas preparadas para enviar: ' + listas.length + '\n' : '') +
       (cambiosCursos.length ? '• Cambios en tus cursos: ' + cambiosCursos.length + '\n' : '') +
       (accesos.length ? '• Necesitan que entres tú: ' + accesos.map((s) => s.nombre).join(', ') : ''),
       [{ texto: buenas.length ? 'Ver ofertas' : 'Volver al inicio', accion: () => ir(buenas.length ? 'ofertas' : 'inicio') }]);
@@ -240,25 +248,40 @@ async function revisarTodo(deUsuario) {
 async function revisarSitio(s) {
   const res = { nuevas: [], cursos: [] };
   for (const pg of lleno(s.paginas).filter((p) => p.url)) {
+   for (let salto = 0; salto < 2; salto++) {
     try {
       await Nav.abrir(pg.url);
       const a = await Nav.analizar();
       if (a.obstaculo) { marcarAcceso(s, a.obstaculo); return res; }
       // Si la página no ha cambiado desde la última vez, no se gasta IA en leerla otra vez
       const h = huella(pg.tipo === 'cursos' ? (a.texto || '').replace(/\d+/g, '') : (a.enlaces || []).map((x) => x.t + '|' + x.h).join('\n'));
-      if (pg.huella === h && s.estado === 'ok') { s.ultima = Date.now(); continue; }
+      if (pg.huella === h && s.estado === 'ok') { s.ultima = Date.now(); break; }
       const r = await iaJson([{ type: 'text', text: promptExtraer(s, pg, a) }], 8000);
       if (r.requiere_acceso) { marcarAcceso(s, 'login'); return res; }
+      const antes = res.nuevas.length;
       incorporar(s, pg, r, res);
       pg.huella = h;
       s.estado = 'ok';
       s.error = '';
       s.ultima = Date.now();
+      // Webs de empresa: correo de RRHH, candidatura espontánea y, si hace falta, entrar en la lista de ofertas
+      if (pg.tipo !== 'cursos' && s.origen !== 'portal' && s.id !== 'labora') {
+        if (r.email_empleo && /@/.test(r.email_empleo)) s.email = r.email_empleo.trim();
+        if (r.enlace_espontanea && /^https?:/.test(r.enlace_espontanea)) s.espontanea = r.enlace_espontanea;
+        const sinOfertas = res.nuevas.length === antes && !lleno(r.ofertas).length;
+        if (sinOfertas && r.enlace_ofertas && /^https?:/.test(r.enlace_ofertas) && r.enlace_ofertas !== pg.url) {
+          pg.url = r.enlace_ofertas; // la próxima vez irá directa a la lista de ofertas
+          pg.huella = '';
+          continue;
+        }
+      }
     } catch (err) {
       if (err.message === 'SIN_CLAVE') throw err;
       s.estado = 'error';
       s.error = err.message;
     }
+    break;
+   }
   }
   return res;
 }
@@ -566,9 +589,9 @@ function tarjetaOferta(o) {
 
 function pOfertas(arg) {
   const todas = arg === 'todas';
-  const visibles = E.ofertas.filter((o) => o.estado !== 'descartada' && (todas || o.nota == null || o.nota >= umbral()))
+  const visibles = E.ofertas.filter((o) => !o.espontanea && o.estado !== 'descartada' && (todas || o.nota == null || o.nota >= umbral()))
     .sort((a, b) => (b.nota || 0) - (a.nota || 0) || b.visto - a.visto);
-  const ocultas = E.ofertas.filter((o) => o.estado !== 'descartada').length - visibles.length;
+  const ocultas = E.ofertas.filter((o) => !o.espontanea && o.estado !== 'descartada').length - visibles.length;
   const opciones = [4, 5, 6, 7, 8].map((n) => '<option value="' + n + '"' + (n === umbral() ? ' selected' : '') + '>' + n + ' o más</option>').join('');
 
   pantalla('Ofertas',
@@ -576,6 +599,7 @@ function pOfertas(arg) {
     (E.ultimaRevision ? '<p class="suave centro">Última búsqueda: ' + hora(E.ultimaRevision) + '</p>' : '') +
     '<label class="campo" for="umbral">Mostrar ofertas con nota</label><select id="umbral">' + opciones + '</select>' +
     htmlAutoAjuste() +
+    htmlEnvioDirecto() +
     (visibles.length ? visibles.slice(0, 60).map(tarjetaOferta).join('')
       : '<div class="tarjeta"><h3>Sin ofertas por ahora</h3><p class="suave">Pulsa «Buscar ofertas ahora». Busco en LABORA y en las empresas de tu lista.</p></div>') +
     (ocultas > 0 && !todas ? '<button class="boton texto" data-ir="ofertas/todas">Ver también ' + ocultas + ' con nota más baja</button>' : ''));
