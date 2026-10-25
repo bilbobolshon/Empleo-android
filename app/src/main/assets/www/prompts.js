@@ -1,9 +1,15 @@
 'use strict';
 // Instrucciones que la app envía a la IA. Todo en español.
 
+function sistema() {
+  const lengua = (typeof E !== 'undefined' && E.ajustes && E.ajustes.idioma) || 'Castellano';
+  return SISTEMA.replace('{IDIOMA}', lengua === 'Castellano' ? 'español de España' : lengua);
+}
+
 const SISTEMA =
   'Eres un experto en selección de personal y en redacción de currículums en España. ' +
-  'Escribes siempre en español de España, claro, sencillo y profesional. ' +
+  'Todo lo que escribas para el usuario (preguntas, currículums, cartas, motivos y explicaciones) va en {IDIOMA}, claro, sencillo y profesional. ' +
+  'Los nombres de los campos del JSON no se traducen. ' +
   'Nunca inventas datos: solo usas lo que aparece en los documentos o lo que el candidato responde. ' +
   'Cuando se te pide JSON, respondes ÚNICAMENTE con JSON válido, sin texto antes ni después y sin bloques de código.';
 

@@ -128,7 +128,7 @@ async function llamadaIA(cuerpo) {
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true'
       },
-      body: JSON.stringify(Object.assign({ model: E.ajustes.modelo, max_tokens: 8000, system: SISTEMA }, cuerpo))
+      body: JSON.stringify(Object.assign({ model: E.ajustes.modelo, max_tokens: 8000, system: sistema() }, cuerpo))
     });
   } catch (err) {
     throw new Error('No hay conexión con la IA. Comprueba que tienes internet y vuelve a intentarlo.');
@@ -278,6 +278,7 @@ function pAjustes() {
     '<select id="modelo">' + opciones + '</select>' +
     '<button class="boton" id="guardar-clave">Guardar y comprobar</button></div>' +
 
+    htmlAjustesBienvenida() +
     '<div class="tarjeta"><h3>Tus datos</h3>' +
     '<p class="suave">Todo se guarda solo en este móvil. ' +
     (E.fuentes.length ? 'CV subidos: ' + E.fuentes.map(esc).join(', ') + '.' : 'Aún no has subido ningún CV.') + '</p>' +
@@ -655,11 +656,13 @@ const RUTAS = {
   candidaturas: pCandidaturas,
   candidatura: pCandidatura,
   labora: pLabora,
-  empresas: pEmpresas
+  empresas: pEmpresas,
+  paso: pPaso
 };
 
 function pintar() {
   window.onresize = null;
+  if (!E.bienvenida && !(location.hash || '').startsWith('#paso')) { location.hash = '#paso/idioma'; return; }
   const h = (location.hash || '#inicio').slice(1);
   const corte = h.indexOf('/');
   const ruta = corte < 0 ? h : h.slice(0, corte);

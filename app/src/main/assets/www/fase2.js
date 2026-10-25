@@ -6,7 +6,7 @@ const HORAS_ENTRE_REVISIONES = 4;
 let revisando = false;
 
 const umbral = () => Number(E.ajustes.umbral || 6);
-const avisar = (t, x) => { if (nativo && nativo.notificar) nativo.notificar(t, x); };
+const avisar = (t, x) => notificarUsuario(t, x);
 const nuevoId = (p) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
 function hist(c, texto) {
@@ -108,10 +108,11 @@ function promptValorar(ofertas) {
     'Perfil: ' + resumenPerfil(),
     'Preferencias: ' + JSON.stringify(E.preferencias || {}),
     'Lo que quiere buscar: ' + (sel.todo ? 'todo tipo de puestos y sectores' : JSON.stringify({ puestos: sel.puestos, sectores: sel.sectores })),
+    'Dónde quiere trabajar: vive en ' + (ciudad() || 'no indicado') + '; ámbito: ' + ambitoTexto() + '.',
     'Sus CV: ' + JSON.stringify(E.cvs.map((c) => ({ id: c.id, titulo: c.titulo, enfoque: c.contenido.titulo_profesional }))),
     'Ofertas: ' + JSON.stringify(ofertas.map((o) => ({ id: o.id, titulo: o.titulo, empresa: o.empresa, lugar: o.lugar, resumen: o.resumen }))),
     '',
-    'Para cada oferta: "nota" de 0 a 10 (10 = encaja perfectamente; baja la nota si está fuera de lo que busca, lejos de su zona o pide requisitos que no tiene),',
+    'Para cada oferta: "nota" de 0 a 10 (10 = encaja perfectamente; baja la nota si está fuera de lo que busca, fuera del ámbito geográfico que quiere o pide requisitos que no tiene),',
     '"motivo" en una frase sencilla y "cv" con el id del CV más adecuado (vacío si no tiene CV).',
     'Devuelve este JSON: {"valoraciones":[{"id":"","nota":0,"motivo":"","cv":""}]}'
   ].join('\n');
@@ -123,11 +124,13 @@ function promptEmpresas() {
   return [
     'Busca en internet empresas reales que puedan contratar a este candidato.',
     'Perfil: ' + resumenPerfil(),
-    'Vive en: ' + (p.localidad || 'no indicado') + '. Zona donde quiere trabajar: ' + ((E.preferencias && E.preferencias.zona) || 'no indicada') + '.',
+    'Vive en: ' + (ciudad() || 'no indicado') + '. Zona donde quiere trabajar: ' + ((E.preferencias && E.preferencias.zona) || 'no indicada') + '.',
+    'Ámbito en el que quiere buscar: ' + ambitoTexto() + '.',
     'Lo que busca: ' + (sel.todo ? 'cualquier puesto acorde a su experiencia' : JSON.stringify({ puestos: sel.puestos, sectores: sel.sectores })),
     'Ya tiene en su lista (no las repitas): ' + E.sitios.map((s) => s.nombre).join(', '),
     '',
-    'Propón entre 8 y 12 empresas de su zona (o con centros allí) y de sectores afines a su perfil.',
+    'Propón entre 8 y 12 empresas de sectores afines a su perfil, repartidas según ese ámbito: empresas locales de su localidad y alrededores, de su provincia y comunidad, grandes empresas nacionales con centros en su zona y, solo si lo ha marcado, internacionales.',
+    'En "sector" indica también el ámbito (local, provincial, nacional o internacional).',
     'Para cada una busca la dirección oficial de su página de empleo ("Trabaja con nosotros", "Empleo", portal de candidatos). Si no la encuentras, deja "url_empleo" vacío.',
     'Responde ÚNICAMENTE con este JSON: {"empresas":[{"nombre":"","sector":"","motivo":"","url_empleo":""}]}'
   ].join('\n');
@@ -684,7 +687,7 @@ function marcarEnviada(c) {
   c.siguiente = '';
   hist(c, 'Enviada tras tu confirmación');
   guardar();
-  if (nativo) nativo.aviso('Candidatura enviada');
+  notificarUsuario('Candidatura enviada', c.titulo + (c.empresa ? ' — ' + c.empresa : '') + '. Te avisaré cuando respondan.');
 }
 
 // ---------- Lo urgente (pantalla de inicio) ----------

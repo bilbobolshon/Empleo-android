@@ -10,8 +10,8 @@ android {
         applicationId "es.fran.empleo"
         minSdk 26
         targetSdk 34
-        versionCode 3
-        versionName "0.3"
+        versionCode 4
+        versionName "0.4"
     }
 
     // Firma fija: así cada APK nueva se instala encima de la anterior sin borrar tus datos
@@ -42,9 +42,17 @@ android {
     buildFeatures {
         buildConfig true
     }
+
+    packaging {
+        resources {
+            excludes += ['META-INF/NOTICE.md', 'META-INF/LICENSE.md', 'META-INF/NOTICE', 'META-INF/LICENSE']
+        }
+    }
 }
 
 dependencies {
     implementation 'androidx.webkit:webkit:1.11.0'
     implementation 'androidx.core:core:1.13.1'
+    implementation 'com.sun.mail:android-mail:1.6.7'
+    implementation 'com.sun.mail:android-activation:1.6.7'
 }

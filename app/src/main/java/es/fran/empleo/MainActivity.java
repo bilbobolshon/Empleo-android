@@ -47,6 +47,16 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.util.Properties;
+
+import javax.mail.AuthenticationFailedException;
+import javax.mail.Message;
+import javax.mail.PasswordAuthentication;
+import javax.mail.Session;
+import javax.mail.Store;
+import javax.mail.Transport;
+import javax.mail.internet.InternetAddress;
+import javax.mail.internet.MimeMessage;
 import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
 
@@ -423,6 +433,69 @@ public class MainActivity extends Activity {
         v.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
     }
 
+    // ---------- Correo (IMAP para comprobar/leer, SMTP para enviar avisos) ----------
+
+    private void tareaCorreo(final String id, final String accion, final String cfgJson,
+                             final String para, final String asunto, final String cuerpo) {
+        new Thread(() -> {
+            String error = null;
+            try {
+                JSONObject c = new JSONObject(cfgJson);
+                final String usuario = c.getString("usuario");
+                final String clave = c.getString("clave").replace(" ", "");
+                if ("probar".equals(accion)) {
+                    String imap = c.optString("imap", "imap.gmail.com");
+                    Properties p = new Properties();
+                    p.put("mail.store.protocol", "imaps");
+                    p.put("mail.imaps.host", imap);
+                    p.put("mail.imaps.port", "993");
+                    p.put("mail.imaps.ssl.enable", "true");
+                    p.put("mail.imaps.connectiontimeout", "20000");
+                    p.put("mail.imaps.timeout", "20000");
+                    Store st = Session.getInstance(p).getStore("imaps");
+                    st.connect(imap, 993, usuario, clave);
+                    st.close();
+                } else {
+                    String smtp = c.optString("smtp", "smtp.gmail.com");
+                    Properties p = new Properties();
+                    p.put("mail.smtp.auth", "true");
+                    p.put("mail.smtp.starttls.enable", "true");
+                    p.put("mail.smtp.starttls.required", "true");
+                    p.put("mail.smtp.host", smtp);
+                    p.put("mail.smtp.port", "587");
+                    p.put("mail.smtp.connectiontimeout", "20000");
+                    p.put("mail.smtp.timeout", "20000");
+                    Session s = Session.getInstance(p, new javax.mail.Authenticator() {
+                        @Override
+                        protected PasswordAuthentication getPasswordAuthentication() {
+                            return new PasswordAuthentication(usuario, clave);
+                        }
+                    });
+                    MimeMessage m = new MimeMessage(s);
+                    m.setFrom(new InternetAddress(usuario, "Mi Empleo", "UTF-8"));
+                    m.setRecipients(Message.RecipientType.TO, InternetAddress.parse(para));
+                    m.setSubject(asunto, "UTF-8");
+                    m.setText(cuerpo, "UTF-8");
+                    Transport.send(m);
+                }
+            } catch (AuthenticationFailedException e) {
+                error = "auth: " + e.getMessage();
+            } catch (Throwable e) {
+                error = e.getClass().getSimpleName() + ": " + e.getMessage();
+            }
+            String res;
+            try {
+                JSONObject r = new JSONObject();
+                r.put("ok", error == null);
+                if (error != null) r.put("error", error);
+                res = r.toString();
+            } catch (Exception e) {
+                res = "{\"ok\":false}";
+            }
+            avisarWeb("correoResultado", id, res);
+        }).start();
+    }
+
     // ---------- Funciones que la interfaz puede llamar: window.Android.xxx() ----------
 
     private class Puente {
@@ -454,6 +527,11 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void notificar(final String titulo, final String texto) {
             runOnUiThread(() -> MainActivity.this.notificar(titulo, texto));
+        }
+
+        @JavascriptInterface
+        public void correo(String id, String accion, String cfg, String para, String asunto, String cuerpo) {
+            tareaCorreo(id, accion, cfg, para, asunto, cuerpo);
         }
 
         @JavascriptInterface
