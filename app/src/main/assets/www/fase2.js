@@ -173,7 +173,13 @@ function promptRellenar(campos, cv, oferta) {
 // ---------- Revisión de webs (LABORA, empresas, portales) ----------
 
 function sitiosRevisables() {
-  return E.sitios.filter((s) => s.activo !== false && lleno(s.paginas).some((p) => p.url));
+  // Las búsquedas que han salido vacías 3 veces seguidas se dejan de repetir (hasta reiniciar la búsqueda)
+  return E.sitios.filter((s) => s.activo !== false && (s.vacias || 0) < 3 && lleno(s.paginas).some((p) => p.url));
+}
+
+// Resultados normales de una página del buscador (sin anuncios)
+function resultadosBuscador(a) {
+  return (a.enlaces || []).filter((x) => /uddg=/.test(x.h) && !/y\.js|ad_domain|ad_provider/.test(x.h)).length;
 }
 
 async function revisarTodo(deUsuario) {
@@ -255,8 +261,19 @@ async function revisarSitio(s) {
    for (let salto = 0; salto < 2; salto++) {
     try {
       await Nav.abrir(pg.url);
-      const a = await Nav.analizar();
+      let a = await Nav.analizar();
       if (a.obstaculo) { marcarAcceso(s, a.obstaculo); return res; }
+      // Búsquedas en el buscador: si no hay resultados, se prueba más amplia y, si sigue vacía, se omite sin gastar IA
+      if (/duckduckgo\.com/.test(pg.url)) {
+        let n = resultadosBuscador(a);
+        if (!n && pg.alternativa) {
+          await Nav.abrir(pg.alternativa);
+          a = await Nav.analizar();
+          n = resultadosBuscador(a);
+        }
+        if (!n) { s.estado = 'vacia'; s.vacias = (s.vacias || 0) + 1; s.ultima = Date.now(); break; }
+        s.vacias = 0;
+      }
       // Si la página no ha cambiado desde la última vez, no se gasta IA en leerla otra vez
       const h = huella(pg.tipo === 'cursos' ? (a.texto || '').replace(/\d+/g, '') : (a.enlaces || []).map((x) => x.t + '|' + x.h).join('\n'));
       if (pg.huella === h && s.estado === 'ok') { s.ultima = Date.now(); break; }

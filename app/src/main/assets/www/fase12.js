@@ -17,6 +17,8 @@ function reiniciarBusqueda(sinPreguntar) {
     E.ofertas = E.ofertas.filter((o) => usadas.has(o.id));
     E.sitios.forEach((s) => {
       lleno(s.paginas).forEach((p) => { p.huella = ''; });
+      s.vacias = 0;
+      if (s.estado === 'vacia') s.estado = 'nuevo';
       if (s.estado === 'ok') s.estado = 'nuevo';
       if (s.espontaneaHecha && !E.candidaturas.some((c) => c.tipo === 'espontanea' && c.empresa === s.nombre)) s.espontaneaHecha = false;
     });

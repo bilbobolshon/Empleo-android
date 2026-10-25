@@ -19,9 +19,14 @@ const PORTALES = [
   { id: 'tecnoempleo', nombre: 'Tecnoempleo', dominio: 'tecnoempleo.com', soloSi: /inform[aá]tic|program|desarroll|sistemas|t[eé]cnico it|software|datos/i }
 ];
 
+// Búsqueda amplia (sin comillas, sin "/a" ni paréntesis) para que no salga vacía
+function terminoSimple(p) {
+  return String(p).replace(/\([^)]*\)/g, ' ').replace(/\/\w{1,3}\b/g, '').replace(/\s+/g, ' ').trim();
+}
 function urlBuscadorSitio(dominio, palabras, loc) {
-  const q = '(' + palabras.map((p) => '"' + p + '"').join(' OR ') + ') ' + (loc && loc !== 'España' ? loc + ' ' : '') + 'oferta site:' + dominio;
-  return 'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q) + '&df=m';
+  const terminos = Array.from(new Set(palabras.map(terminoSimple).filter(Boolean)));
+  const q = 'site:' + dominio + ' (' + terminos.join(' OR ') + ')' + (loc && loc !== 'España' ? ' ' + loc : '');
+  return 'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(q);
 }
 const MAX_PUESTOS_PORTALES = 3;
 
@@ -64,7 +69,12 @@ function asegurarPortales() {
   };
   if (palabras.length) {
     portalesActivos().forEach((p) => {
-      if (p.dominio) anadir(p, p.nombre + ': ' + palabras.join(', '), urlBuscadorSitio(p.dominio, palabras, loc));
+      if (p.dominio) {
+        anadir(p, p.nombre + ': ' + palabras.map(terminoSimple).join(', '), urlBuscadorSitio(p.dominio, palabras, loc));
+        // Si con la ciudad no sale nada, se prueba sin ella
+        const s = E.sitios[E.sitios.length - 1];
+        if (loc && loc !== 'España') s.paginas[0].alternativa = urlBuscadorSitio(p.dominio, palabras, '');
+      }
       else palabras.forEach((kw) => anadir(p, p.nombre + ': ' + kw, p.url(kw, loc)));
     });
   }
@@ -75,7 +85,9 @@ function asegurarPortales() {
 function htmlPortales() {
   asegurarPortales();
   const activos = new Set(portalesActivos().map((p) => p.id));
-  const busquedas = E.sitios.filter((s) => s.origen === 'portal');
+  const todas = E.sitios.filter((s) => s.origen === 'portal');
+  const busquedas = todas.filter((s) => s.estado !== 'vacia');
+  const vacias = todas.length - busquedas.length;
   const estado = (s) => s.estado === 'acceso' ? '🔑 Necesita que entres tú' : s.estado === 'error' ? '⚠️ No se pudo leer' : s.ultima ? '✅ ' + hora(s.ultima) : '⏳ Sin revisar';
   const palabras = palabrasBusqueda();
   return '<div class="tarjeta"><h3>Portales de empleo</h3>' +
@@ -86,6 +98,8 @@ function htmlPortales() {
     busquedas.map((s) => '<p style="margin:6px 0"><b>' + esc(s.nombre) + '</b><br><span class="suave">' + estado(s) + '</span>' +
       (s.estado === 'acceso' ? ' <button class="boton" style="min-height:40px;margin:4px 0" data-accion="entrar:' + s.id + '">Entrar</button>'
         : ' <button class="boton texto" style="min-height:32px;margin:0;width:auto;display:inline" data-accion="ver:' + esc((lleno(s.paginas)[0] || {}).url) + '">Ver</button>') + '</p>').join('') +
+    (vacias ? '<p class="suave">' + vacias + (vacias === 1 ? ' búsqueda no ha dado resultados' : ' búsquedas no han dado resultados') +
+      ': las oculto y, si siguen vacías, dejo de repetirlas hasta que reinicies la búsqueda.</p>' : '') +
     '<button class="boton secundario" data-ir="busqueda">Cambiar qué busco</button></div>';
 }
 
