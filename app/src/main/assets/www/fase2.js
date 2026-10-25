@@ -572,6 +572,7 @@ function pCandidatura(id) {
     '<span class="estado-c e' + e.c + '">' + e.t + '</span><h2>' + esc(c.titulo) + '</h2>' +
     '<p class="suave">' + [c.empresa, c.fuente].filter(Boolean).map(esc).join(' · ') + (cv ? '<br>CV usado: ' + esc(cv.titulo) : '') + '</p>' +
     '<div class="tarjeta ' + (pendiente ? 'urgente' : 'bien') + '"><div class="etiqueta">Siguiente paso</div><p>' + esc(siguientePaso(c)) + '</p></div>' +
+    htmlContactoCandidatura(c) +
     (pendiente ? '<button class="boton" data-accion="presentarme:' + c.oferta + '">Continuar candidatura</button>' : '') +
     (c.url ? '<button class="boton secundario" data-accion="ver:' + esc(c.url) + '">Ver la oferta</button>' : '') +
     '<label class="campo" for="cambiar-estado">Cambiar estado</label>' +

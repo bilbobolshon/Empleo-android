@@ -47,6 +47,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.lang.ref.WeakReference;
 import java.util.Properties;
 
 import javax.mail.AuthenticationFailedException;
@@ -85,10 +86,18 @@ public class MainActivity extends Activity {
     private ValueCallback<Uri[]> esperaArchivos;
     private Uri fotoUri;
     private int numAviso = 100;
+    private static WeakReference<MainActivity> instancia = new WeakReference<>(null);
+
+    /** Lo llama la revisión de correo en segundo plano al terminar. */
+    static void correoTerminado(String estado) {
+        MainActivity a = instancia.get();
+        if (a != null) a.avisarWeb("correoListo", estado, null);
+    }
 
     @Override
     protected void onCreate(Bundle estado) {
         super.onCreate(estado);
+        instancia = new WeakReference<>(this);
 
         FrameLayout raiz = new FrameLayout(this);
         web = new WebView(this);
@@ -120,8 +129,22 @@ public class MainActivity extends Activity {
         crearCanal();
         pedirPermisoAvisos();
 
+        String ir = getIntent() != null ? getIntent().getStringExtra("ir") : null;
         if (estado != null) web.restoreState(estado);
-        else web.loadUrl(INICIO);
+        else web.loadUrl(ir != null ? INICIO + "#" + ir : INICIO);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        String ir = intent.getStringExtra("ir");
+        if (ir != null) avisarWeb("irA", ir, null);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (instancia.get() == this) instancia = new WeakReference<>(null);
+        super.onDestroy();
     }
 
     // ---------- Navegador interno (portal) ----------
@@ -532,6 +555,85 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void correo(String id, String accion, String cfg, String para, String asunto, String cuerpo) {
             tareaCorreo(id, accion, cfg, para, asunto, cuerpo);
+        }
+
+        // --- correo en segundo plano ---
+
+        @JavascriptInterface
+        public void guardarConfigFondo(String json) {
+            getSharedPreferences(TrabajoCorreo.PREFS, MODE_PRIVATE).edit().putString("config", json).apply();
+        }
+
+        @JavascriptInterface
+        public void programarCorreo(int minutos) {
+            TrabajoCorreo.programar(getApplicationContext(), minutos);
+        }
+
+        @JavascriptInterface
+        public void cancelarCorreo() {
+            TrabajoCorreo.cancelar(getApplicationContext());
+        }
+
+        @JavascriptInterface
+        public void correoRevisarAhora() {
+            TrabajoCorreo.ahora(getApplicationContext());
+        }
+
+        @JavascriptInterface
+        public String tomarCorreos() {
+            return TrabajoCorreo.tomarCola(getApplicationContext());
+        }
+
+        @JavascriptInterface
+        public String estadoCorreo() {
+            return getSharedPreferences(TrabajoCorreo.PREFS, MODE_PRIVATE).getString("estado", "{}");
+        }
+
+        @JavascriptInterface
+        public void reiniciarCorreo() {
+            getSharedPreferences(TrabajoCorreo.PREFS, MODE_PRIVATE).edit().remove("ultimoUid").apply();
+        }
+
+        @JavascriptInterface
+        public boolean sinAhorro() {
+            android.os.PowerManager pm = (android.os.PowerManager) getSystemService(Context.POWER_SERVICE);
+            return pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
+        }
+
+        @JavascriptInterface
+        public void pedirSinAhorro() {
+            runOnUiThread(() -> {
+                try {
+                    Intent i = new Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                    i.setData(Uri.parse("package:" + getPackageName()));
+                    startActivity(i);
+                } catch (Exception e) {
+                    try {
+                        startActivity(new Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+                    } catch (Exception e2) {
+                        MainActivity.this.aviso("Abre Ajustes > Batería y quita Mi Empleo del ahorro de energía");
+                    }
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void calendario(final String titulo, final double inicio, final String lugar, final String nota) {
+            runOnUiThread(() -> {
+                try {
+                    Intent i = new Intent(Intent.ACTION_INSERT).setData(android.provider.CalendarContract.Events.CONTENT_URI);
+                    i.putExtra(android.provider.CalendarContract.Events.TITLE, titulo);
+                    if (inicio > 0) {
+                        i.putExtra(android.provider.CalendarContract.EXTRA_EVENT_BEGIN_TIME, (long) inicio);
+                        i.putExtra(android.provider.CalendarContract.EXTRA_EVENT_END_TIME, (long) inicio + 3600000L);
+                    }
+                    i.putExtra(android.provider.CalendarContract.Events.EVENT_LOCATION, lugar);
+                    i.putExtra(android.provider.CalendarContract.Events.DESCRIPTION, nota);
+                    startActivity(i);
+                } catch (Exception e) {
+                    MainActivity.this.aviso("No hay app de calendario");
+                }
+            });
         }
 
         @JavascriptInterface

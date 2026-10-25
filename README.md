@@ -16,7 +16,7 @@ Las versiones nuevas se instalan encima de la anterior sin perder tus datos.
 1. ✅ Importar CV (PDF o foto), preguntas, «Qué busco» y creación de CV adaptados en PDF.
 2. ✅ Navegador con traspaso de control (accesos, captchas, Cl@ve, certificado), LABORA (ofertas y cursos),
    empresas afines y añadidas a mano, valoración de ofertas, candidaturas con autorrelleno e historial.
-3. ⏳ Leer Gmail: ofertas, respuestas, teléfonos y entrevistas; revisión en segundo plano.
+3. ✅ Bienvenida (idioma, correo, avisos, ámbito) y lectura del correo cada 30 min, también con la app cerrada: ofertas, respuestas, teléfonos, entrevistas y calendario.
 
 ## Cómo está hecha (para quien la mantenga)
 

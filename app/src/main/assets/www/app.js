@@ -24,6 +24,7 @@ function estadoInicial() {
     ofertas: [],
     cursos: [],
     candidaturas: [],
+    correos: [],
     ultimaRevision: 0
   };
 }
@@ -45,6 +46,7 @@ let E = cargar();
 let pendientes = []; // archivos elegidos y aún sin analizar (solo en memoria)
 
 function guardar() {
+  if (typeof programarSincronizacion === 'function') programarSincronizacion();
   try { localStorage.setItem(CLAVE, JSON.stringify(E)); }
   catch (err) { mensaje('No se han podido guardar los datos en el móvil.\n' + err.message); }
 }
@@ -219,7 +221,7 @@ function pInicio() {
   } else if (!sitiosRevisables().length) {
     urgente = tarjetaUrgente('Siguiente paso', 'Dime dónde buscar', 'Configura LABORA y añade empresas para que busque ofertas por ti.', 'empresas');
   }
-  urgente += urgentesFase2();
+  urgente += urgentesFase2() + urgentesCorreo();
   if (!urgente) {
     urgente = '<div class="tarjeta bien"><div class="etiqueta">Todo al día</div>' +
       '<h3>No tienes nada pendiente</h3><p class="suave">Sigo vigilando tus webs. Te aviso cuando haya algo.</p></div>';
@@ -241,7 +243,7 @@ function pInicio() {
       mosaico('📄', 'Mis CV', E.cvs.length ? E.cvs.length + ' creados' : 'Ninguno aún', 'miscv') +
       mosaico('🎯', 'Qué busco', E.busqueda && E.busqueda.quitados.length ? 'Afinado' : 'Todo', 'busqueda') +
       mosaico('📤', 'Subir CV', 'PDF o foto', 'subir') +
-      mosaico('✉️', 'Correo', 'Próximamente', '', true) +
+      mosaico('✉️', 'Correo', E.correo && E.correo.conectado ? (E.correos.filter((x) => !x.visto).length ? E.correos.filter((x) => !x.visto).length + ' nuevos' : 'Conectado') : 'Conectar', 'correo') +
       mosaico('⚙️', 'Ajustes', E.ajustes.apiKey ? 'IA conectada' : 'Falta la IA', 'ajustes') +
     '</div>', false);
 }
@@ -657,7 +659,8 @@ const RUTAS = {
   candidatura: pCandidatura,
   labora: pLabora,
   empresas: pEmpresas,
-  paso: pPaso
+  paso: pPaso,
+  correo: pCorreo
 };
 
 function pintar() {
@@ -681,5 +684,7 @@ $('#atras').onclick = () => {
 };
 
 window.addEventListener('hashchange', pintar);
+incorporarCorreos();
 pintar();
+sincronizarFondo();
 setTimeout(revisionAutomatica, 4000);
