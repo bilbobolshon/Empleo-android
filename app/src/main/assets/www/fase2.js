@@ -2,7 +2,7 @@
 // Fase 2: LABORA, webs de empresas, ofertas, candidaturas con autorrelleno e historial.
 
 const LABORA_URL = 'https://labora.gva.es/';
-const HORAS_ENTRE_REVISIONES = 4;
+const HORAS_ENTRE_REVISIONES = 8;
 let revisando = false;
 
 const umbral = () => Number(E.ajustes.umbral || 6);
@@ -172,7 +172,7 @@ function sitiosRevisables() {
 
 async function revisarTodo(deUsuario) {
   if (revisando) { if (deUsuario) mensaje('Ya estoy revisando. Te aviso al terminar.'); return; }
-  if (!E.ajustes.apiKey) { if (deUsuario) fallo(new Error('SIN_CLAVE')); return; }
+  if (!iaLista()) { if (deUsuario) fallo(new Error('SIN_CLAVE')); return; }
   if (!Nav.disponible()) { if (deUsuario) mensaje('La revisión de webs solo funciona dentro de la app del móvil.'); return; }
   const sitios = sitiosRevisables();
   if (!sitios.length) {
@@ -236,9 +236,13 @@ async function revisarSitio(s) {
       await Nav.abrir(pg.url);
       const a = await Nav.analizar();
       if (a.obstaculo) { marcarAcceso(s, a.obstaculo); return res; }
+      // Si la página no ha cambiado desde la última vez, no se gasta IA en leerla otra vez
+      const h = huella(pg.tipo === 'cursos' ? (a.texto || '').replace(/\d+/g, '') : (a.enlaces || []).map((x) => x.t + '|' + x.h).join('\n'));
+      if (pg.huella === h && s.estado === 'ok') { s.ultima = Date.now(); continue; }
       const r = await iaJson([{ type: 'text', text: promptExtraer(s, pg, a) }], 8000);
       if (r.requiere_acceso) { marcarAcceso(s, 'login'); return res; }
       incorporar(s, pg, r, res);
+      pg.huella = h;
       s.estado = 'ok';
       s.error = '';
       s.ultima = Date.now();
@@ -249,6 +253,12 @@ async function revisarSitio(s) {
     }
   }
   return res;
+}
+
+function huella(t) {
+  let h = 5381;
+  for (let i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36) + '-' + t.length;
 }
 
 function marcarAcceso(s, tipo) {
@@ -286,8 +296,8 @@ function incorporar(s, pg, r, res) {
 }
 
 async function valorar(lista) {
-  for (let i = 0; i < lista.length; i += 15) {
-    const tanda = lista.slice(i, i + 15);
+  for (let i = 0; i < lista.length; i += 25) {
+    const tanda = lista.slice(i, i + 25);
     try {
       const r = await iaJson([{ type: 'text', text: promptValorar(tanda) }], 6000);
       lleno(r.valoraciones).forEach((v) => {
@@ -437,6 +447,24 @@ function pEmpresas() {
     }).join('') : '<p class="suave">Tu lista está vacía. Pulsa «Proponer empresas» o añade las tuyas.</p>'));
 }
 
+// Busca la página de empleo de una empresa con un buscador normal, sin gastar IA
+function buscarWebEmpleo(nombre) {
+  if (!Nav.disponible()) return Promise.resolve('');
+  return Nav.cola(async () => {
+    await Nav.abrir('https://html.duckduckgo.com/html/?q=' + encodeURIComponent(nombre + ' trabaja con nosotros empleo'));
+    const a = await Nav.analizar();
+    const enlaces = (a.enlaces || []).map((x) => {
+      let h = x.h;
+      const m = h.match(/[?&]uddg=([^&]+)/);
+      if (m) { try { h = decodeURIComponent(m[1]); } catch (e) { /* enlace raro */ } }
+      return { t: x.t, h };
+    }).filter((x) => /^https?:/.test(x.h) &&
+      !/duckduckgo\.com|linkedin\.|infojobs\.|indeed\.|glassdoor\.|wikipedia\.|facebook\.|instagram\.|twitter\.|x\.com\/|youtube\.|jooble\.|trabajos\.com|tecnoempleo|infoempleo|jobtoday|talent\.com|opcionempleo/i.test(x.h));
+    const buena = enlaces.find((x) => /empleo|trabaja|careers?|jobs?|talent|candidat|selecci|work/i.test(x.h + ' ' + x.t));
+    return (buena || enlaces[0] || {}).h || '';
+  }).catch(() => '');
+}
+
 async function proponerEmpresas() {
   if (!E.perfil) { mensaje('Primero sube tu CV para que sepa qué empresas te encajan.', [{ texto: 'Subir CV', accion: () => ir('subir') }]); return; }
   cargando('Buscando empresas afines a tu perfil…\nPuede tardar un par de minutos.');
@@ -447,20 +475,30 @@ async function proponerEmpresas() {
     if (!empresas.length) { mensaje('No he encontrado empresas nuevas. Prueba a añadirlas a mano.'); return; }
     pantalla('Empresas propuestas',
       '<p class="suave">Marca las que quieras que vigile. Las que no tienen web de empleo las puedes completar luego.</p>' +
-      empresas.map((e, i) => '<label class="tarjeta orientacion"><input type="checkbox" data-e="' + i + '"' + (e.url_empleo ? ' checked' : '') + '>' +
+      empresas.map((e, i) => '<label class="tarjeta orientacion"><input type="checkbox" data-e="' + i + '" checked>' +
         '<div><h3>' + esc(e.nombre) + '</h3><p class="suave">' + esc([e.sector, e.motivo].filter(Boolean).join(' · ')) + '</p>' +
-        '<p class="suave">' + (e.url_empleo ? '🔗 ' + esc(host(e.url_empleo)) : 'Sin web de empleo encontrada') + '</p></div></label>').join('') +
+        '<p class="suave">' + (e.url_empleo ? '🔗 ' + esc(host(e.url_empleo)) : 'Buscaré su web de empleo al añadirla') + '</p></div></label>').join('') +
       '<button class="boton" id="guardar-empresas">Añadir las marcadas</button>');
-    $('#guardar-empresas').onclick = () => {
+    $('#guardar-empresas').onclick = async () => {
       let n = 0;
-      document.querySelectorAll('[data-e]:checked').forEach((c) => {
-        const e = empresas[Number(c.dataset.e)];
-        if (!e.url_empleo) return;
-        E.sitios.push({ id: nuevoId('si'), nombre: e.nombre, origen: 'empresa', motivo: e.sector || '', paginas: [{ tipo: 'ofertas', url: e.url_empleo }], estado: 'nuevo' });
+      const sinWeb = [];
+      const marcadas = Array.from(document.querySelectorAll('[data-e]:checked')).map((c) => empresas[Number(c.dataset.e)]);
+      for (let k = 0; k < marcadas.length; k++) {
+        const e = marcadas[k];
+        let url = e.url_empleo;
+        // Con la IA gratuita las direcciones pueden estar inventadas: se buscan con un buscador normal
+        if (!url || proveedorIA() === 'gemini') {
+          cargando('Buscando la web de empleo de ' + e.nombre + ' (' + (k + 1) + ' de ' + marcadas.length + ')…');
+          url = (await buscarWebEmpleo(e.nombre)) || url;
+        }
+        if (!url) { sinWeb.push(e.nombre); continue; }
+        E.sitios.push({ id: nuevoId('si'), nombre: e.nombre, origen: 'empresa', motivo: e.sector || '', paginas: [{ tipo: 'ofertas', url }], estado: 'nuevo' });
         n++;
-      });
+      }
+      quitarCarga();
       guardar();
-      mensaje(n ? 'He añadido ' + n + ' empresas. Las revisaré en la próxima revisión.' : 'No has añadido ninguna (las que no tienen web de empleo no se pueden vigilar).',
+      mensaje((n ? 'He añadido ' + n + ' empresas. Las revisaré en la próxima revisión.' : 'No he añadido ninguna.') +
+        (sinWeb.length ? '\n\nNo he encontrado la web de empleo de: ' + sinWeb.join(', ') + '. Puedes añadirlas pegando su enlace.' : ''),
         [{ texto: 'Revisar ahora', accion: () => revisarTodo(true) }, { texto: 'Ver mi lista', accion: () => ir('empresas') }]);
     };
   } catch (err) { fallo(err); }
@@ -479,7 +517,8 @@ async function anadirEmpresa() {
   }
   cargando('Buscando la web de empleo de ' + t + '…');
   try {
-    const r = await iaJsonBuscando(promptUrlEmpresa(t));
+    let r = { nombre: t, url_empleo: await buscarWebEmpleo(t) };
+    if (!r.url_empleo && proveedorIA() === 'claude') r = await iaJsonBuscando(promptUrlEmpresa(t));
     quitarCarga();
     if (!r.url_empleo) {
       mensaje('No he encontrado la web de empleo de ' + t + '. Si la conoces, pega aquí el enlace de su «Trabaja con nosotros».');
@@ -650,8 +689,11 @@ function presentarme(ofertaId) {
         continue;
       }
       Nav.panel('Rellenando el formulario con tus datos…', []);
-      const m = await iaJson([{ type: 'text', text: promptRellenar(campos, cvUsado, o) }], 8000);
-      const r = await Nav.ejecutarJson(jsRellenar(lleno(m.valores)));
+      const local = rellenarLocal(campos);
+      let m = { valores: [], pendientes: [] };
+      if (local.resto.length) m = await iaJson([{ type: 'text', text: promptRellenar(local.resto, cvUsado, o) }], 8000);
+      else m.pendientes = local.pendientes;
+      const r = await Nav.ejecutarJson(jsRellenar(local.valores.concat(lleno(m.valores))));
       const n = r ? r.rellenados : 0;
       hist(c, 'La app rellenó ' + n + ' campos');
       const falta = lleno(m.pendientes);
@@ -680,6 +722,34 @@ function presentarme(ofertaId) {
     guardar();
     ir('candidatura/' + c.id);
   }).catch((err) => { Nav.ocultar(); pausar(c, 'Se interrumpió por un error'); fallo(err); });
+}
+
+// Rellena sin IA los campos básicos (nombre, apellidos, correo, teléfono, localidad).
+// Solo se pregunta a la IA por los campos que quedan y que lo necesitan.
+function rellenarLocal(campos) {
+  const p = E.perfil || {};
+  const partes = (p.nombre || '').trim().split(/\s+/);
+  const nombre = partes[0] || '';
+  const apellidos = partes.slice(1).join(' ');
+  const valores = [], resto = [], pendientes = [];
+  campos.forEach((f) => {
+    if (f.tipo === 'file') return;
+    const txt = ((f.etiqueta || '') + ' ' + (f.nombre || '')).toLowerCase();
+    let v = null;
+    if (['text', 'email', 'tel', 'textarea', 'number'].includes(f.tipo) && f.tipo !== 'textarea') {
+      if (/nombre completo|full.?name|nombre y apellidos/.test(txt)) v = p.nombre;
+      else if (/apellido|last.?name|surname/.test(txt)) v = apellidos;
+      else if (/e-?mail|correo/.test(txt)) v = p.email;
+      else if (/tel[eé]fono|m[oó]vil|phone|celular/.test(txt)) v = p.telefono;
+      else if (/localidad|ciudad|poblaci[oó]n|municipio|city/.test(txt)) v = p.localidad || ciudad();
+      else if (/(^|\W)(nombre|first.?name|name)(\W|$)/.test(txt) && !/empresa|usuario|user|company/.test(txt)) v = nombre;
+    }
+    if (v) { if (!f.valor) valores.push({ i: f.i, valor: v }); return; }
+    if (f.tipo === 'checkbox') return; // condiciones legales y privacidad: las decide el usuario
+    if (f.valor) return;               // ya tiene algo escrito
+    if (f.requerido || ['select', 'radio', 'textarea'].includes(f.tipo)) resto.push(f);
+  });
+  return { valores, resto, pendientes };
 }
 
 function marcarEnviada(c) {
@@ -723,7 +793,7 @@ function refrescarSiInicio() {
 
 // Revisión automática al abrir la app (si ha pasado tiempo)
 function revisionAutomatica() {
-  if (revisando || !E.ajustes.apiKey || !Nav.disponible() || Nav.ocupado) return;
+  if (revisando || !iaLista() || !Nav.disponible() || Nav.ocupado) return;
   if (!sitiosRevisables().length) return;
   if (Date.now() - (E.ultimaRevision || 0) < HORAS_ENTRE_REVISIONES * 3600000) return;
   revisarTodo(false);

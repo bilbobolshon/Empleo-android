@@ -3,16 +3,32 @@
 
 const CLAVE = 'miempleo.v1';
 const MODELOS = [
-  { id: 'claude-sonnet-5-5', nombre: 'Equilibrado (recomendado)' },
-  { id: 'claude-haiku-5-5', nombre: 'Rápido y más barato' },
+  { id: 'claude-haiku-5-5', nombre: 'Rápido y más barato (recomendado)' },
+  { id: 'claude-sonnet-5-5', nombre: 'Equilibrado' },
   { id: 'claude-opus-5-5', nombre: 'Máxima calidad (más caro)' }
 ];
+const MODELOS_GEMINI = [
+  { id: 'gemini-3.5-flash-lite', nombre: 'Flash-Lite (recomendado, unas 500 consultas gratis al día)' },
+  { id: 'gemini-3.6-flash', nombre: 'Flash (mejor, pero muy pocas consultas gratis al día)' }
+];
+
+// IA elegida: Gemini (gratis) o Claude (de pago)
+const proveedorIA = () => E.ajustes.proveedor || (E.ajustes.apiKey ? 'claude' : 'gemini');
+const claveIA = () => (proveedorIA() === 'gemini' ? E.ajustes.claveGemini : E.ajustes.apiKey) || '';
+const modeloIA = () => proveedorIA() === 'gemini' ? (E.ajustes.modeloGemini || MODELOS_GEMINI[0].id) : (E.ajustes.modelo || MODELOS[0].id);
+const iaLista = () => !!claveIA();
+
+function contarUsoIA() {
+  const hoy = new Date().toISOString().slice(0, 10);
+  if (!E.usoIA || E.usoIA.dia !== hoy) E.usoIA = { dia: hoy, n: 0 };
+  E.usoIA.n++;
+}
 
 // ---------- Datos guardados en el móvil ----------
 
 function estadoInicial() {
   return {
-    ajustes: { apiKey: '', modelo: MODELOS[0].id },
+    ajustes: { proveedor: 'gemini', apiKey: '', claveGemini: '', modelo: MODELOS[0].id, modeloGemini: MODELOS_GEMINI[0].id },
     fuentes: [],          // nombres de los CV subidos
     perfil: null,         // datos extraídos de los CV
     preguntas: [],
@@ -116,10 +132,17 @@ function nombreCorto() {
   return n ? n.trim().split(/\s+/)[0] : '';
 }
 
-// ---------- Conexión con la IA (Claude) ----------
+// ---------- Conexión con la IA (Gemini gratis o Claude de pago) ----------
 
 async function llamadaIA(cuerpo) {
-  if (!E.ajustes.apiKey) throw new Error('SIN_CLAVE');
+  if (!iaLista()) throw new Error('SIN_CLAVE');
+  contarUsoIA();
+  return proveedorIA() === 'gemini' ? llamadaGemini(cuerpo) : llamadaClaude(cuerpo);
+}
+
+async function llamadaClaude(cuerpo) {
+  const datos = Object.assign({ model: modeloIA(), max_tokens: 8000, system: sistema() }, cuerpo);
+  delete datos.json;
   let r;
   try {
     r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -130,7 +153,7 @@ async function llamadaIA(cuerpo) {
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true'
       },
-      body: JSON.stringify(Object.assign({ model: E.ajustes.modelo, max_tokens: 8000, system: sistema() }, cuerpo))
+      body: JSON.stringify(datos)
     });
   } catch (err) {
     throw new Error('No hay conexión con la IA. Comprueba que tienes internet y vuelve a intentarlo.');
@@ -140,7 +163,7 @@ async function llamadaIA(cuerpo) {
     const m = (d.error && d.error.message) || '';
     if (r.status === 401) throw new Error('La clave de la IA no es válida. Revísala en Ajustes.');
     if (r.status === 429 || r.status === 529 || r.status === 503) throw new Error('La IA está saturada ahora mismo. Espera un minuto y vuelve a intentarlo.');
-    if (/credit|balance/i.test(m)) throw new Error('Tu cuenta de la IA no tiene saldo. Añade crédito en console.anthropic.com.');
+    if (/credit|balance/i.test(m)) throw new Error('Tu cuenta de la IA no tiene saldo. Añade crédito en console.anthropic.com o cambia a la IA gratuita en Ajustes.');
     if (/model/i.test(m) && !/tool/i.test(m)) throw new Error('El modelo de IA elegido no está disponible. Cambia el modelo en Ajustes.\n\n(' + m + ')');
     throw new Error('La IA ha devuelto un error (' + r.status + ').\n' + m);
   }
@@ -148,13 +171,53 @@ async function llamadaIA(cuerpo) {
   return d;
 }
 
-async function ia(contenido, maxTokens) {
-  const d = await llamadaIA({ max_tokens: maxTokens || 8000, messages: [{ role: 'user', content: contenido }] });
+// Traduce la petición al formato de Gemini y la respuesta al formato que usa la app
+async function llamadaGemini(cuerpo) {
+  if (cuerpo.tools) throw new Error('La búsqueda en internet (tool web_search) no está disponible en la IA gratuita.');
+  const partes = (bloques) => (typeof bloques === 'string' ? [{ type: 'text', text: bloques }] : bloques).map((b) => {
+    if (b.type === 'text') return { text: b.text };
+    if (b.type === 'image' || b.type === 'document') return { inline_data: { mime_type: b.source.media_type, data: b.source.data } };
+    return { text: '' };
+  });
+  const datos = {
+    systemInstruction: { parts: [{ text: sistema() }] },
+    contents: (cuerpo.messages || []).map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: partes(m.content) })),
+    generationConfig: { maxOutputTokens: Math.max(8192, cuerpo.max_tokens || 0) }
+  };
+  if (cuerpo.json) datos.generationConfig.responseMimeType = 'application/json';
+  let r;
+  try {
+    r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(modeloIA()) + ':generateContent', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': E.ajustes.claveGemini },
+      body: JSON.stringify(datos)
+    });
+  } catch (err) {
+    throw new Error('No hay conexión con la IA. Comprueba que tienes internet y vuelve a intentarlo.');
+  }
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const m = (d.error && d.error.message) || '';
+    if (r.status === 429 || /RESOURCE_EXHAUSTED|quota/i.test(m)) throw new Error('Has llegado al límite gratuito de la IA por hoy. Se renueva cada día (a las 9:00 en España, aproximadamente).');
+    if (/API key|API_KEY|permission/i.test(m) || r.status === 401 || r.status === 403) throw new Error('La clave de Gemini no es válida. Revísala en Ajustes.');
+    if (r.status === 404 || /not found|model/i.test(m)) throw new Error('El modelo de IA elegido no está disponible. Elige el otro en Ajustes.\n\n(' + m + ')');
+    if (r.status === 503 || r.status === 500) throw new Error('La IA está saturada ahora mismo. Espera un minuto y vuelve a intentarlo.');
+    throw new Error('La IA ha devuelto un error (' + r.status + ').\n' + m);
+  }
+  const c = (d.candidates || [])[0] || {};
+  if (c.finishReason === 'MAX_TOKENS') throw new Error('La respuesta de la IA era demasiado larga y se cortó. Vuelve a intentarlo.');
+  if (c.finishReason === 'SAFETY' || c.finishReason === 'PROHIBITED_CONTENT') throw new Error('La IA no ha querido procesar este contenido.');
+  const texto = ((c.content && c.content.parts) || []).filter((p) => p.text && !p.thought).map((p) => p.text).join('');
+  return { content: [{ type: 'text', text: texto }], stop_reason: 'end_turn' };
+}
+
+async function ia(contenido, maxTokens, json) {
+  const d = await llamadaIA({ max_tokens: maxTokens || 8000, messages: [{ role: 'user', content: contenido }], json: !!json });
   return (d.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
 }
 
 async function iaJson(contenido, maxTokens) {
-  const t = await ia(contenido, maxTokens);
+  const t = await ia(contenido, maxTokens, true);
   const a = t.indexOf('{'), b = t.lastIndexOf('}');
   try {
     if (a < 0 || b < a) throw new Error();
@@ -208,8 +271,8 @@ function pInicio() {
   const n = nombreCorto();
   let urgente = '';
   const sinResponder = E.preguntas.findIndex((p) => !E.respuestas[p.id]);
-  if (!E.ajustes.apiKey) {
-    urgente = tarjetaUrgente('Para empezar', 'Conecta la IA', 'Es lo que lee tus CV y los mejora. Te explico cómo en un minuto.', 'ajustes');
+  if (!iaLista()) {
+    urgente = tarjetaUrgente('Para empezar', 'Conecta la IA (gratis)', 'Es lo que lee tus CV y los mejora. Te explico cómo en un minuto.', 'ajustes');
   } else if (!E.perfil) {
     urgente = tarjetaUrgente('Siguiente paso', 'Sube tu CV', 'En PDF o con una foto. Puedes subir varios.', 'subir');
   } else if (!E.preferencias && E.preguntas.length) {
@@ -244,7 +307,7 @@ function pInicio() {
       mosaico('🎯', 'Qué busco', E.busqueda && E.busqueda.quitados.length ? 'Afinado' : 'Todo', 'busqueda') +
       mosaico('📤', 'Subir CV', 'PDF o foto', 'subir') +
       mosaico('✉️', 'Correo', E.correo && E.correo.conectado ? (E.correos.filter((x) => !x.visto).length ? E.correos.filter((x) => !x.visto).length + ' nuevos' : 'Conectado') : 'Conectar', 'correo') +
-      mosaico('⚙️', 'Ajustes', E.ajustes.apiKey ? 'IA conectada' : 'Falta la IA', 'ajustes') +
+      mosaico('⚙️', 'Ajustes', iaLista() ? 'IA conectada' : 'Falta la IA', 'ajustes') +
     '</div>', false);
 }
 
@@ -261,24 +324,40 @@ function mosaico(icono, titulo, nota, ruta, pronto) {
 // --- Ajustes ---
 
 function pAjustes() {
-  const opciones = MODELOS.map((m) =>
-    '<option value="' + m.id + '"' + (m.id === E.ajustes.modelo ? ' selected' : '') + '>' + m.nombre + '</option>').join('');
+  const prov = proveedorIA();
+  const lista = prov === 'gemini' ? MODELOS_GEMINI : MODELOS;
+  const actual = modeloIA();
+  const opciones = lista.map((m) => '<option value="' + m.id + '"' + (m.id === actual ? ' selected' : '') + '>' + m.nombre + '</option>').join('');
+  const hoy = new Date().toISOString().slice(0, 10);
+  const usos = E.usoIA && E.usoIA.dia === hoy ? E.usoIA.n : 0;
+  const pasos = prov === 'gemini'
+    ? '<ol class="pasos suave">' +
+        '<li>Pulsa el botón de abajo: se abre Google AI Studio. Entra con tu cuenta de Google.</li>' +
+        '<li>Pulsa <b>Create API key</b> (Crear clave de API) y acepta.</li>' +
+        '<li>Copia la clave (empieza por <b>AIza</b>) y pégala aquí.</li>' +
+      '</ol>' +
+      '<p class="suave">Es gratis, con un límite de consultas al día. En el plan gratuito Google puede usar lo que se envía para mejorar sus productos.</p>' +
+      '<button class="boton secundario" id="abrir-consola">Conseguir la clave gratis</button>'
+    : '<ol class="pasos suave">' +
+        '<li>Abre la web de Anthropic con el botón de abajo y crea una cuenta o entra.</li>' +
+        '<li>Añade algo de saldo y, si quieres, un límite de gasto mensual.</li>' +
+        '<li>Ve a <b>API Keys</b>, pulsa <b>Create Key</b>, copia la clave (empieza por <b>sk-ant-</b>) y pégala aquí.</li>' +
+      '</ol>' +
+      '<button class="boton secundario" id="abrir-consola">Abrir la web para conseguir la clave</button>';
+
   pantalla('Ajustes',
-    '<div class="tarjeta"><h3>Conectar la IA</h3>' +
-    '<p class="suave">La app usa la IA Claude para leer tus CV, hacerte preguntas y redactar los CV nuevos. Necesita una clave personal. Cuesta céntimos por uso.</p>' +
-    '<ol class="pasos suave">' +
-      '<li>Abre la web de Anthropic con el botón de abajo y crea una cuenta o entra.</li>' +
-      '<li>Añade algo de saldo (con 5 € tienes para mucho tiempo).</li>' +
-      '<li>Ve a <b>API Keys</b> y pulsa <b>Create Key</b>.</li>' +
-      '<li>Copia la clave (empieza por <b>sk-ant-</b>) y pégala aquí.</li>' +
-    '</ol>' +
-    '<button class="boton secundario" id="abrir-consola">Abrir la web para conseguir la clave</button>' +
+    '<div class="tarjeta"><h3>Inteligencia artificial</h3>' +
+    '<p class="suave">La IA lee tus CV, te hace preguntas, redacta CV y cartas, valora ofertas y entiende tus correos. La app la usa lo mínimo posible.</p>' +
+    '<button class="opcion' + (prov === 'gemini' ? ' marcada' : '') + '" data-prov="gemini"><b>Gemini de Google — gratis</b><br><span class="suave">Recomendada. Con límite diario de consultas.</span></button>' +
+    '<button class="opcion' + (prov === 'claude' ? ' marcada' : '') + '" data-prov="claude"><b>Claude — de pago</b><br><span class="suave">Más precisa. Cuesta céntimos por consulta.</span></button>' +
+    pasos +
     '<label class="campo" for="clave">Tu clave</label>' +
-    '<input type="password" id="clave" placeholder="sk-ant-…" autocomplete="off" value="' + esc(E.ajustes.apiKey) + '">' +
+    '<input type="password" id="clave" placeholder="' + (prov === 'gemini' ? 'AIza…' : 'sk-ant-…') + '" autocomplete="off" value="' + esc(claveIA()) + '">' +
     '<button class="boton texto" id="ver-clave">Mostrar la clave</button>' +
-    '<label class="campo" for="modelo">Tipo de IA</label>' +
+    '<label class="campo" for="modelo">Modelo</label>' +
     '<select id="modelo">' + opciones + '</select>' +
-    '<button class="boton" id="guardar-clave">Guardar y comprobar</button></div>' +
+    '<button class="boton" id="guardar-clave">Guardar y comprobar</button>' +
+    '<p class="suave centro">Consultas a la IA hoy: ' + usos + '</p></div>' +
 
     htmlAjustesBienvenida() +
     '<div class="tarjeta"><h3>Tus datos</h3>' +
@@ -287,7 +366,10 @@ function pAjustes() {
     '<button class="boton peligro" id="borrar-todo">Borrar todos mis datos</button></div>' +
     '<p class="suave centro">Versión ' + esc(nativo ? nativo.version() : 'web') + '</p>');
 
-  $('#abrir-consola').onclick = () => abrirEnlace('https://console.anthropic.com/settings/keys');
+  document.querySelectorAll('[data-prov]').forEach((b) => {
+    b.onclick = () => { E.ajustes.proveedor = b.dataset.prov; guardar(); pAjustes(); };
+  });
+  $('#abrir-consola').onclick = () => abrirEnlace(prov === 'gemini' ? 'https://aistudio.google.com/app/apikey' : 'https://console.anthropic.com/settings/keys');
   $('#ver-clave').onclick = (ev) => {
     const c = $('#clave');
     c.type = c.type === 'password' ? 'text' : 'password';
@@ -296,12 +378,13 @@ function pAjustes() {
   $('#guardar-clave').onclick = async () => {
     const clave = $('#clave').value.trim();
     if (!clave) { mensaje('Pega primero tu clave.'); return; }
-    E.ajustes.apiKey = clave;
-    E.ajustes.modelo = $('#modelo').value;
+    E.ajustes.proveedor = prov;
+    if (prov === 'gemini') { E.ajustes.claveGemini = clave; E.ajustes.modeloGemini = $('#modelo').value; }
+    else { E.ajustes.apiKey = clave; E.ajustes.modelo = $('#modelo').value; }
     guardar();
     cargando('Comprobando la conexión con la IA…');
     try {
-      await ia([{ type: 'text', text: 'Responde solo con la palabra: listo' }], 20);
+      await ia([{ type: 'text', text: 'Responde solo con la palabra: listo' }], 300);
       quitarCarga();
       mensaje('¡Conectado! La IA funciona correctamente.', [{ texto: 'Continuar', accion: () => ir('inicio') }]);
     } catch (err) { fallo(err); }
@@ -353,7 +436,7 @@ function pSubir() {
 }
 
 async function analizar() {
-  if (!E.ajustes.apiKey) { fallo(new Error('SIN_CLAVE')); return; }
+  if (!iaLista()) { fallo(new Error('SIN_CLAVE')); return; }
   cargando('Leyendo tus CV…\nPuede tardar hasta un minuto.');
   try {
     const bloques = [];

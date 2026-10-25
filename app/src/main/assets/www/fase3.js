@@ -105,7 +105,7 @@ function pPaso(arg) {
     if (num < PASOS.length - 1) { ir('paso/' + PASOS[num + 1]); return; }
     E.bienvenida = true;
     guardar();
-    mensaje('¡Todo listo! Ahora conecta la IA y sube tu CV.', [{ texto: 'Continuar', accion: () => ir(E.ajustes.apiKey ? 'inicio' : 'ajustes') }]);
+    mensaje('¡Todo listo! Ahora conecta la IA y sube tu CV.', [{ texto: 'Continuar', accion: () => ir(iaLista() ? 'inicio' : 'ajustes') }]);
   };
   const cabecera = editar ? '' :
     '<p class="suave">Paso ' + (num + 1) + ' de ' + PASOS.length + '</p>' +

@@ -46,13 +46,14 @@ function promptCorreo() {
 function sincronizarFondo() {
   if (!nativo || !nativo.guardarConfigFondo) return;
   const c = E.correo || {};
-  const listo = c.conectado && c.clave && E.ajustes.apiKey;
+  const listo = c.conectado && c.clave && iaLista();
   const dominios = Array.from(new Set(E.sitios.map((s) => baseDominio((lleno(s.paginas)[0] || {}).url))
     .concat(E.candidaturas.map((x) => baseDominio(x.url))).filter((d) => d && !/gva\.es$/.test(d))));
   nativo.guardarConfigFondo(JSON.stringify({
     correo: { usuario: c.direccion, clave: c.clave, imap: c.imap, smtp: c.smtp },
-    apiKey: E.ajustes.apiKey,
-    modelo: E.ajustes.modelo,
+    proveedor: proveedorIA(),
+    apiKey: claveIA(),
+    modelo: modeloIA(),
     sistema: sistema(),
     instrucciones: promptCorreo(),
     avisos: E.ajustes.avisos || 'ambos',
@@ -79,7 +80,7 @@ function incorporarCorreos() {
   lista.forEach((x) => { if (incorporarCorreo(x, nuevas)) n++; });
   if (E.correos.length > 200) E.correos = E.correos.slice(0, 200);
   guardar();
-  if (nuevas.length && E.ajustes.apiKey) valorar(nuevas).then(() => refrescar()).catch(() => {});
+  if (nuevas.length && iaLista()) valorar(nuevas).then(() => refrescar()).catch(() => {});
   return n;
 }
 

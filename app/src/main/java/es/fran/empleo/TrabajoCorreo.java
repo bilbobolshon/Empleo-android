@@ -44,11 +44,17 @@ public class TrabajoCorreo extends Worker {
     static final String CANAL = "avisos";
     private static final Object CERROJO = new Object();
 
+    // Palabras de empleo en el remitente o el asunto
     private static final Pattern EMPLEO = Pattern.compile(
-            "empleo|oferta|vacante|candidat|entrevista|selecci[oó]n|curr[ií]cul|\\bcv\\b|puesto|trabajo|contrataci|"
-                    + "recursos humanos|rrhh|inscripci|labora|servef|sepe|infojobs|linkedin|indeed|infoempleo|jobandtalent|"
-                    + "adecco|randstad|manpower|eurofirms|gi group|hays|michael page|job|career|hiring|interview|application|"
-                    + "formaci[oó]n|curso", Pattern.CASE_INSENSITIVE);
+            "empleo|oferta de trabajo|ofertas de trabajo|vacante|candidat|entrevista|proceso de selecci|curr[ií]cul|\\bcv\\b|"
+                    + "puesto|contrataci|recursos humanos|rrhh|inscripci|labora|servef|sepe|infojobs|linkedin|indeed|infoempleo|"
+                    + "jobandtalent|adecco|randstad|manpower|eurofirms|gi group|hays|michael page|\\bjobs?\\b|career|hiring|"
+                    + "interview|your application|tu solicitud|tu candidatura|formaci[oó]n|curso", Pattern.CASE_INSENSITIVE);
+    // Frases claras de empleo en el texto (más estrictas, para no enviar publicidad a la IA)
+    private static final Pattern EMPLEO_TEXTO = Pattern.compile(
+            "tu candidatura|su candidatura|proceso de selecci|entrevista de trabajo|concertar (una )?entrevista|"
+                    + "hemos recibido tu (cv|curr[ií]culum|solicitud)|oferta de empleo|puesto de trabajo|"
+                    + "your application|job interview", Pattern.CASE_INSENSITIVE);
 
     public TrabajoCorreo(@NonNull Context c, @NonNull WorkerParameters p) {
         super(c, p);
@@ -110,7 +116,7 @@ public class TrabajoCorreo extends Worker {
                 String de = m.optString("de").toLowerCase(Locale.ROOT);
                 String asunto = m.optString("asunto");
                 if (de.contains(propio) && asunto.startsWith("Mi Empleo")) continue; // nuestros propios avisos
-                String todo = de + " " + asunto + " " + m.optString("texto");
+                String cabecera = de + " " + asunto;
                 boolean empresa = false;
                 if (dominios != null) {
                     for (int k = 0; k < dominios.length(); k++) {
@@ -118,7 +124,9 @@ public class TrabajoCorreo extends Worker {
                         if (!d.isEmpty() && de.contains(d)) { empresa = true; break; }
                     }
                 }
-                if (empresa || EMPLEO.matcher(todo).find()) candidatos.put(m);
+                if (empresa || EMPLEO.matcher(cabecera).find() || EMPLEO_TEXTO.matcher(m.optString("texto")).find()) {
+                    candidatos.put(m);
+                }
             }
 
             if (candidatos.length() > 0) {
@@ -168,8 +176,55 @@ public class TrabajoCorreo extends Worker {
         return null;
     }
 
-    /** Llama a la IA (Claude) con las instrucciones que prepara la app y los correos. */
+    /** Llama a la IA elegida (Gemini gratis o Claude) con las instrucciones que prepara la app y los correos. */
     private static JSONArray clasificar(JSONObject cfg, JSONArray correos) throws Exception {
+        String texto = cfg.optString("instrucciones") + "\n\nCORREOS NUEVOS:\n" + correos.toString();
+        String s = "gemini".equals(cfg.optString("proveedor")) ? gemini(cfg, texto) : claude(cfg, texto);
+        int a = s.indexOf('{'), z = s.lastIndexOf('}');
+        if (a < 0 || z < a) throw new Exception("Respuesta de la IA sin datos");
+        JSONObject r = new JSONObject(s.substring(a, z + 1));
+        JSONArray lista = r.optJSONArray("correos");
+        return lista == null ? new JSONArray() : lista;
+    }
+
+    private static String gemini(JSONObject cfg, String texto) throws Exception {
+        JSONObject cuerpo = new JSONObject();
+        cuerpo.put("systemInstruction", new JSONObject().put("parts", new JSONArray().put(new JSONObject().put("text", cfg.optString("sistema")))));
+        cuerpo.put("contents", new JSONArray().put(new JSONObject().put("role", "user")
+                .put("parts", new JSONArray().put(new JSONObject().put("text", texto)))));
+        cuerpo.put("generationConfig", new JSONObject().put("maxOutputTokens", 8192).put("responseMimeType", "application/json"));
+        String modelo = cfg.optString("modelo", "gemini-3.5-flash-lite");
+        HttpURLConnection con = (HttpURLConnection) new URL("https://generativelanguage.googleapis.com/v1beta/models/"
+                + modelo + ":generateContent").openConnection();
+        con.setConnectTimeout(20000);
+        con.setReadTimeout(120000);
+        con.setRequestMethod("POST");
+        con.setDoOutput(true);
+        con.setRequestProperty("content-type", "application/json");
+        con.setRequestProperty("x-goog-api-key", cfg.optString("apiKey"));
+        try (OutputStream os = con.getOutputStream()) {
+            os.write(cuerpo.toString().getBytes(StandardCharsets.UTF_8));
+        }
+        int codigo = con.getResponseCode();
+        String respuesta = leerTodo(codigo >= 400 ? con.getErrorStream() : con.getInputStream());
+        if (codigo >= 400) throw new Exception("IA " + codigo + ": " + respuesta);
+        JSONObject d = new JSONObject(respuesta);
+        StringBuilder t = new StringBuilder();
+        JSONArray cands = d.optJSONArray("candidates");
+        if (cands != null && cands.length() > 0) {
+            JSONObject contenido = cands.getJSONObject(0).optJSONObject("content");
+            JSONArray partes = contenido == null ? null : contenido.optJSONArray("parts");
+            if (partes != null) {
+                for (int i = 0; i < partes.length(); i++) {
+                    JSONObject p = partes.getJSONObject(i);
+                    if (!p.optBoolean("thought", false)) t.append(p.optString("text"));
+                }
+            }
+        }
+        return t.toString();
+    }
+
+    private static String claude(JSONObject cfg, String texto) throws Exception {
         JSONObject cuerpo = new JSONObject();
         cuerpo.put("model", cfg.optString("modelo", "claude-sonnet-5-5"));
         cuerpo.put("max_tokens", 8000);
@@ -177,7 +232,7 @@ public class TrabajoCorreo extends Worker {
         JSONArray mensajes = new JSONArray();
         JSONObject usuario = new JSONObject();
         usuario.put("role", "user");
-        usuario.put("content", cfg.optString("instrucciones") + "\n\nCORREOS NUEVOS:\n" + correos.toString());
+        usuario.put("content", texto);
         mensajes.put(usuario);
         cuerpo.put("messages", mensajes);
 
@@ -205,12 +260,7 @@ public class TrabajoCorreo extends Worker {
                 if ("text".equals(b.optString("type"))) t.append(b.optString("text"));
             }
         }
-        String s = t.toString();
-        int a = s.indexOf('{'), z = s.lastIndexOf('}');
-        if (a < 0 || z < a) throw new Exception("Respuesta de la IA sin datos");
-        JSONObject r = new JSONObject(s.substring(a, z + 1));
-        JSONArray lista = r.optJSONArray("correos");
-        return lista == null ? new JSONArray() : lista;
+        return t.toString();
     }
 
     private static String leerTodo(InputStream in) throws Exception {

@@ -22,4 +22,4 @@ Las versiones nuevas se instalan encima de la anterior sin perder tus datos.
 
 - `app/src/main/java/.../MainActivity.java`: parte nativa de Android (elegir archivos, cámara, guardar PDF).
 - `app/src/main/assets/www/`: la interfaz (HTML/JS), con la lógica de la app y las instrucciones para la IA.
-- La IA es Claude (API de Anthropic); la clave se introduce en *Ajustes* y solo se guarda en el móvil.
+- La IA por defecto es Gemini (Google, plan gratuito); Claude es opcional. La clave se introduce en *Ajustes* y solo se guarda en el móvil.
