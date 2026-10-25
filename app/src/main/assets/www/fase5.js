@@ -7,6 +7,7 @@ const PORTALES = [
   { id: 'linkedin', nombre: 'LinkedIn', url: (kw, loc) => 'https://www.linkedin.com/jobs/search/?keywords=' + encodeURIComponent(kw) + '&location=' + encodeURIComponent(loc) + '&sortBy=DD' },
   { id: 'jooble', nombre: 'Jooble', url: (kw, loc) => 'https://es.jooble.org/SearchResult?ukw=' + encodeURIComponent(kw) + (loc && loc !== 'España' ? '&rgns=' + encodeURIComponent(loc) : '') },
   // Estos se buscan con un buscador normal limitado a su web (una sola búsqueda con todos los puestos)
+  { id: 'labora', nombre: 'LABORA (ofertas públicas)', dominio: 'labora.gva.es' },
   { id: 'infoempleo', nombre: 'Infoempleo', dominio: 'infoempleo.com' },
   { id: 'turijobs', nombre: 'Turijobs', dominio: 'turijobs.com' },
   { id: 'empleate', nombre: 'Empléate (SEPE)', dominio: 'empleate.gob.es' },

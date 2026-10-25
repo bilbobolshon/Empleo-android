@@ -385,6 +385,7 @@ function pLabora() {
     '<button class="boton" data-accion="ensenar-labora">Entrar en LABORA</button>' +
     (pag('ofertas') || pag('cursos') ? '<button class="boton secundario" data-accion="revisar-labora">Revisar LABORA ahora</button>' : '') +
     '</div>' +
+    htmlDemanda() +
     '<h3>Mis cursos (' + cursos.length + ')</h3>' +
     (cursos.length ? cursos.map((c) => '<div class="tarjeta"' + (c.url ? ' data-accion="ver:' + esc(c.url) + '"' : '') + '><h3>' + esc(c.titulo) + '</h3>' +
       '<p class="suave">' + [c.estado, c.fechas, c.lugar].filter(Boolean).map(esc).join(' · ') + '</p></div>').join('')

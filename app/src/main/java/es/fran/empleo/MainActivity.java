@@ -637,6 +637,16 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void programarAviso(String id, double cuando, String titulo, String texto) {
+            TrabajoAviso.programar(getApplicationContext(), id, (long) cuando, titulo, texto);
+        }
+
+        @JavascriptInterface
+        public void cancelarAviso(String id) {
+            TrabajoAviso.cancelar(getApplicationContext(), id);
+        }
+
+        @JavascriptInterface
         public String version() {
             return BuildConfig.VERSION_NAME;
         }
